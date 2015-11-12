@@ -1,0 +1,98 @@
+# Copyright (c) 2013,2014. Intel Corporation. All rights reserved.
+# Copyright (c) 2007, 2008, 2009. QLogic Corp. All rights reserved.
+# Copyright (c) 2003, 2004, 2005. PathScale, Inc. All rights reserved.
+#
+# This software is available to you under a choice of one of two
+# licenses.  You may choose to be licensed under the terms of the GNU
+# General Public License (GPL) Version 2, available from the file
+# COPYING in the main directory of this source tree, or the
+# OpenIB.org BSD license below:
+#
+#     Redistribution and use in source and binary forms, with or
+#     without modification, are permitted provided that the following
+#     conditions are met:
+#
+#      - Redistributions of source code must retain the above
+#        copyright notice, this list of conditions and the following
+#        disclaimer.
+#
+#      - Redistributions in binary form must reproduce the above
+#        copyright notice, this list of conditions and the following
+#        disclaimer in the documentation and/or other materials
+#        provided with the distribution.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+# BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+# Patent licenses, if any, provided herein do not apply to
+# combinations of this program with other software, or any other
+# product whatsoever.
+%if 0%{?require_kver:1}
+%define kdir /lib/modules/%{require_kver}/build
+%define kver %{require_kver}
+BuildRequires: kernel-devel = %(echo %{kver}|sed -e 's/-/_/g')
+%else
+%define kver %(uname -r)
+%define kdir /lib/modules/%{kver}/build
+BuildRequires: kernel-devel
+%endif
+%if 0%{!?build_src_rpm:1}
+%define relext _%(echo %{kver}|sed -e 's/-/_/g')
+%endif
+
+Name: @NAME@
+Version: @VERSION@
+Release: @RELEASE@
+Source: %{name}-%{version}.tgz
+
+Summary: Intel HFI1 driver
+Packager: Mike Marciniszyn <mike.marciniszyn@intel.com>
+License: GPLv2 or BSD
+Group: System Environment/Base
+BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
+Url: http://openfabrics.org
+%define arch %(uname -p)
+Requires: kernel = %(echo %{kver} | sed -e 's/\(.*\)\.%{arch}/\1/g' | sed -e 's/-/_/g')
+Obsoletes: hfi
+Obsoletes: hfi-devel
+Obsoletes: hfi-debuginfo
+
+%package devel
+Summary: Development headers for Intel HFI1 driver interface
+Group: System Environment/Development
+
+%description
+hfi1 provides the driver for Intel HFI gen1 cards
+
+%description devel
+Development header files for Intel HFI1 driver interface
+
+%prep
+%setup -q
+
+%build
+make VERSION=%version KVER=%kver RELEASE=%release
+
+%install
+make VERSION=%version KVER=%kver RELEASE=%release DESTDIR=${RPM_BUILD_ROOT} install
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(-,root,root)
+/lib/modules/%kver/updates/hfi1.ko
+
+%files devel
+%defattr(-,root,root,-)
+@USER_INC_DIR@/hfi1_user.h
+
+%post
+depmod -a %{kver}
+
