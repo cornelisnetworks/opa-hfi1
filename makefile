@@ -36,10 +36,10 @@
 #
 # The desired version number comes from the most recent tag starting with "v"
 BASEVERSION=0.2
-VERSION = $(shell if [ -e .git ] ; then  git describe --tags --abbrev=0 --match='v*' | sed -e 's/^v//' -e 's/-/_/'; else echo "version" ; fi)
+VERSION = 0.10
 # The desired release number comes the git describe following the version which
 # is the number of commits since the version tag was planted suffixed by the g<commitid>
-RELEASE = $(shell if [ -e .git ] ; then git describe --tags --long --match='v*' | sed -e 's/v[0-9.]*-\([0-9]*\)/\1/' | sed 's/-g.*$$//'; else echo "release" ; fi)
+RELEASE = 80
 
 EXCLUDES = --exclude-vcs --exclude-backups --exclude='*.patch' --exclude='*.swp' --exclude='series' --exclude='*.orig' --exclude=hfi.spec.in
 
