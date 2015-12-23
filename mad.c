@@ -168,9 +168,9 @@ static void send_trap(struct hfi1_ibport *ibp, void *data, unsigned len)
 void hfi1_bad_pqkey(struct hfi1_ibport *ibp, __be16 trap_num, u32 key, u32 sl,
 		    u32 qp1, u32 qp2, __be16 lid1, __be16 lid2)
 {
-	struct ib_mad_notice_attr data;
+	struct opa_mad_notice_attr data;
 
-	if (trap_num == IB_NOTICE_TRAP_BAD_PKEY)
+	if (trap_num == OPA_TRAP_BAD_P_KEY)
 		ibp->pkey_violations++;
 	else
 		ibp->qkey_violations++;
@@ -181,13 +181,14 @@ void hfi1_bad_pqkey(struct hfi1_ibport *ibp, __be16 trap_num, u32 key, u32 sl,
 	data.prod_type_msb = 0;
 	data.prod_type_lsb = IB_NOTICE_PROD_CA;
 	data.trap_num = trap_num;
-	data.issuer_lid = cpu_to_be16(ppd_from_ibp(ibp)->lid);
 	data.toggle_count = 0;
+	data.issuer_lid = (__force __be32)cpu_to_be16(ppd_from_ibp(ibp)->lid);
 	memset(&data.details, 0, sizeof(data.details));
-	data.details.ntc_257_258.lid1 = lid1;
-	data.details.ntc_257_258.lid2 = lid2;
+	data.details.ntc_257_258.lid1 = (__force __be32)lid1;
+	data.details.ntc_257_258.lid2 = (__force __be32)lid2;
 	data.details.ntc_257_258.key = cpu_to_be32(key);
-	data.details.ntc_257_258.sl_qp1 = cpu_to_be32((sl << 28) | qp1);
+	data.details.ntc_257_258.sl = sl << 3;
+	data.details.ntc_257_258.qp1 = cpu_to_be32(qp1);
 	data.details.ntc_257_258.qp2 = cpu_to_be32(qp2);
 
 	send_trap(ibp, &data, sizeof(data));
@@ -199,15 +200,15 @@ void hfi1_bad_pqkey(struct hfi1_ibport *ibp, __be16 trap_num, u32 key, u32 sl,
 static void bad_mkey(struct hfi1_ibport *ibp, struct ib_mad_hdr *mad,
 		     __be64 mkey, __be32 dr_slid, u8 return_path[], u8 hop_cnt)
 {
-	struct ib_mad_notice_attr data;
+	struct opa_mad_notice_attr data;
 
 	/* Send violation trap */
 	data.generic_type = IB_NOTICE_TYPE_SECURITY;
 	data.prod_type_msb = 0;
 	data.prod_type_lsb = IB_NOTICE_PROD_CA;
-	data.trap_num = IB_NOTICE_TRAP_BAD_MKEY;
-	data.issuer_lid = cpu_to_be16(ppd_from_ibp(ibp)->lid);
+	data.trap_num = OPA_TRAP_BAD_M_KEY;
 	data.toggle_count = 0;
+	data.issuer_lid = (__force __be32)cpu_to_be16(ppd_from_ibp(ibp)->lid);
 	memset(&data.details, 0, sizeof(data.details));
 	data.details.ntc_256.lid = data.issuer_lid;
 	data.details.ntc_256.method = mad->method;
@@ -215,7 +216,7 @@ static void bad_mkey(struct hfi1_ibport *ibp, struct ib_mad_hdr *mad,
 	data.details.ntc_256.attr_mod = mad->attr_mod;
 	data.details.ntc_256.mkey = mkey;
 	if (mad->mgmt_class == IB_MGMT_CLASS_SUBN_DIRECTED_ROUTE) {
-		data.details.ntc_256.dr_slid = (__force __be16)dr_slid;
+		data.details.ntc_256.dr_slid = dr_slid;
 		data.details.ntc_256.dr_trunc_hop = IB_NOTICE_TRAP_DR_NOTICE;
 		if (hop_cnt > ARRAY_SIZE(data.details.ntc_256.dr_rtn_path)) {
 			data.details.ntc_256.dr_trunc_hop |=
@@ -235,14 +236,14 @@ static void bad_mkey(struct hfi1_ibport *ibp, struct ib_mad_hdr *mad,
  */
 void hfi1_cap_mask_chg(struct hfi1_ibport *ibp)
 {
-	struct ib_mad_notice_attr data;
+	struct opa_mad_notice_attr data;
 
 	data.generic_type = IB_NOTICE_TYPE_INFO;
 	data.prod_type_msb = 0;
 	data.prod_type_lsb = IB_NOTICE_PROD_CA;
-	data.trap_num = IB_NOTICE_TRAP_CAP_MASK_CHG;
-	data.issuer_lid = cpu_to_be16(ppd_from_ibp(ibp)->lid);
+	data.trap_num = OPA_TRAP_CHANGE_CAPABILITY;
 	data.toggle_count = 0;
+	data.issuer_lid = (__force __be32)cpu_to_be16(ppd_from_ibp(ibp)->lid);
 	memset(&data.details, 0, sizeof(data.details));
 	data.details.ntc_144.lid = data.issuer_lid;
 	data.details.ntc_144.new_cap_mask = cpu_to_be32(ibp->port_cap_flags);
@@ -255,17 +256,17 @@ void hfi1_cap_mask_chg(struct hfi1_ibport *ibp)
  */
 void hfi1_sys_guid_chg(struct hfi1_ibport *ibp)
 {
-	struct ib_mad_notice_attr data;
+	struct opa_mad_notice_attr data;
 
 	data.generic_type = IB_NOTICE_TYPE_INFO;
 	data.prod_type_msb = 0;
 	data.prod_type_lsb = IB_NOTICE_PROD_CA;
-	data.trap_num = IB_NOTICE_TRAP_SYS_GUID_CHG;
-	data.issuer_lid = cpu_to_be16(ppd_from_ibp(ibp)->lid);
+	data.trap_num = OPA_TRAP_CHANGE_SYSGUID;
 	data.toggle_count = 0;
+	data.issuer_lid = (__force __be32)cpu_to_be16(ppd_from_ibp(ibp)->lid);
 	memset(&data.details, 0, sizeof(data.details));
-	data.details.ntc_145.lid = data.issuer_lid;
 	data.details.ntc_145.new_sys_guid = ib_hfi1_sys_image_guid;
+	data.details.ntc_145.lid = data.issuer_lid;
 
 	send_trap(ibp, &data, sizeof(data));
 }
@@ -275,18 +276,18 @@ void hfi1_sys_guid_chg(struct hfi1_ibport *ibp)
  */
 void hfi1_node_desc_chg(struct hfi1_ibport *ibp)
 {
-	struct ib_mad_notice_attr data;
+	struct opa_mad_notice_attr data;
 
 	data.generic_type = IB_NOTICE_TYPE_INFO;
 	data.prod_type_msb = 0;
 	data.prod_type_lsb = IB_NOTICE_PROD_CA;
-	data.trap_num = IB_NOTICE_TRAP_CAP_MASK_CHG;
-	data.issuer_lid = cpu_to_be16(ppd_from_ibp(ibp)->lid);
+	data.trap_num = OPA_TRAP_CHANGE_CAPABILITY;
+	data.issuer_lid = (__force __be32)cpu_to_be16(ppd_from_ibp(ibp)->lid);
 	data.toggle_count = 0;
 	memset(&data.details, 0, sizeof(data.details));
 	data.details.ntc_144.lid = data.issuer_lid;
-	data.details.ntc_144.local_changes = 1;
-	data.details.ntc_144.change_flags = IB_NOTICE_TRAP_NODE_DESC_CHG;
+	data.details.ntc_144.change_flags =
+		cpu_to_be16(IB_NOTICE_TRAP_NODE_DESC_CHG);
 
 	send_trap(ibp, &data, sizeof(data));
 }
@@ -328,7 +329,7 @@ static int __subn_get_opa_nodeinfo(struct opa_smp *smp, u32 am, u8 *data,
 		return reply((struct ib_mad_hdr *)smp);
 	}
 
-	ni->port_guid = dd->pport[pidx].guid;
+	ni->port_guid = cpu_to_be64(dd->pport[pidx].guid);
 	ni->base_version = OPA_MGMT_BASE_VERSION;
 	ni->class_version = OPA_SMI_CLASS_VERSION;
 	ni->node_type = 1;     /* channel adapter */

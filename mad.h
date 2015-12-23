@@ -67,6 +67,111 @@
 #define IB_VLARB_HIGHPRI_0_31   3
 #define IB_VLARB_HIGHPRI_32_63  4
 
+struct opa_mad_notice_attr {
+	u8 generic_type;
+	u8 prod_type_msb;
+	__be16 prod_type_lsb;
+	__be16 trap_num;
+	__be16 toggle_count;
+	__be32 issuer_lid;
+	__be32 reserved1;
+	union ib_gid issuer_gid;
+
+	union {
+		struct {
+			u8	details[64];
+		} raw_data;
+
+		struct {
+			union ib_gid	gid;
+		} __packed ntc_64_65_66_67;
+
+		struct {
+			__be32	lid;
+		} __packed ntc_128;
+
+		struct {
+			__be32	lid;		/* where violation happened */
+			u8	port_num;	/* where violation happened */
+		} __packed ntc_129_130_131;
+
+		struct {
+			__be32	lid;		/* LID where change occurred */
+			__be32	new_cap_mask;	/* new capability mask */
+			__be16	reserved2;
+			__be16	cap_mask;
+			__be16	change_flags;	/* low 4 bits only */
+		} __packed ntc_144;
+
+		struct {
+			__be64	new_sys_guid;
+			__be32	lid;		/* lid where sys guid changed */
+		} __packed ntc_145;
+
+		struct {
+			__be32	lid;
+			__be32	dr_slid;
+			u8	method;
+			u8	dr_trunc_hop;
+			__be16	attr_id;
+			__be32	attr_mod;
+			__be64	mkey;
+			u8	dr_rtn_path[30];
+		} __packed ntc_256;
+
+		struct {
+			__be32		lid1;
+			__be32		lid2;
+			__be32		key;
+			u8		sl;	/* SL: high 5 bits */
+			u8		reserved3[3];
+			union ib_gid	gid1;
+			union ib_gid	gid2;
+			__be32		qp1;	/* high 8 bits reserved */
+			__be32		qp2;	/* high 8 bits reserved */
+		} __packed ntc_257_258;
+
+		struct {
+			__be16		flags;	/* low 8 bits reserved */
+			__be16		pkey;
+			__be32		lid1;
+			__be32		lid2;
+			u8		sl;	/* SL: high 5 bits */
+			u8		reserved4[3];
+			union ib_gid	gid1;
+			union ib_gid	gid2;
+			__be32		qp1;	/* high 8 bits reserved */
+			__be32		qp2;	/* high 8 bits reserved */
+		} __packed ntc_259;
+
+		struct {
+			__be32	lid;
+		} __packed ntc_2048;
+
+	} details;
+};
+
+/*
+ * OPA Traps
+ */
+#define	OPA_TRAP_GID_NOW_IN_SERVICE		cpu_to_be16(64)
+#define	OPA_TRAP_GID_OUT_OF_SERVICE		cpu_to_be16(65)
+#define	OPA_TRAP_ADD_MULTICAST_GROUP		cpu_to_be16(66)
+#define	OPA_TRAL_DEL_MULTICAST_GROUP		cpu_to_be16(67)
+#define	OPA_TRAP_UNPATH				cpu_to_be16(68)
+#define	OPA_TRAP_REPATH				cpu_to_be16(69)
+#define	OPA_TRAP_PORT_CHANGE_STATE		cpu_to_be16(128)
+#define	OPA_TRAP_LINK_INTEGRITY			cpu_to_be16(129)
+#define	OPA_TRAP_EXCESSIVE_BUFFER_OVERRUN	cpu_to_be16(130)
+#define	OPA_TRAP_FLOW_WATCHDOG			cpu_to_be16(131)
+#define	OPA_TRAP_CHANGE_CAPABILITY		cpu_to_be16(144)
+#define	OPA_TRAP_CHANGE_SYSGUID			cpu_to_be16(145)
+#define	OPA_TRAP_BAD_M_KEY			cpu_to_be16(256)
+#define	OPA_TRAP_BAD_P_KEY			cpu_to_be16(257)
+#define	OPA_TRAP_BAD_Q_KEY			cpu_to_be16(258)
+#define	OPA_TRAP_SWITCH_BAD_PKEY		cpu_to_be16(259)
+#define	OPA_SMA_TRAP_DATA_LINK_WIDTH		cpu_to_be16(2048)
+
 #define OPA_MAX_PREEMPT_CAP         32
 #define OPA_VLARB_LOW_ELEMENTS       0
 #define OPA_VLARB_HIGH_ELEMENTS      1
@@ -104,12 +209,6 @@ struct ib_pma_portcounters_cong {
 #define IB_SMP_UNSUP_METHOD     cpu_to_be16(0x0008)
 #define IB_SMP_UNSUP_METH_ATTR  cpu_to_be16(0x000C)
 #define IB_SMP_INVALID_FIELD    cpu_to_be16(0x001C)
-
-#define OPA_MAX_PREEMPT_CAP         32
-#define OPA_VLARB_LOW_ELEMENTS       0
-#define OPA_VLARB_HIGH_ELEMENTS      1
-#define OPA_VLARB_PREEMPT_ELEMENTS   2
-#define OPA_VLARB_PREEMPT_MATRIX     3
 
 #define HFI1_XMIT_RATE_UNSUPPORTED               0x0
 #define HFI1_XMIT_RATE_PICO                      0x7

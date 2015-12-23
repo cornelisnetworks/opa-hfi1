@@ -64,7 +64,7 @@ int hfi1_acquire_user_pages(unsigned long vaddr, size_t npages, bool writable,
 	up_read(&current->mm->mmap_sem);
 
 	if (pinned + npages > lock_limit && !can_lock)
-		return -EDQUOT;
+		return -ENOMEM;
 
 	ret = get_user_pages_fast(vaddr, npages, writable, pages);
 	if (ret < 0)

@@ -372,8 +372,6 @@ static inline void complete_tx(struct sdma_engine *sde,
 	struct iowait *wait = tx->wait;
 	callback_t complete = tx->complete;
 
-	/* remove from list */
-	sde->tx_ring[sde->tx_head++ & sde->sdma_mask] = NULL;
 #ifdef CONFIG_HFI1_DEBUG_SDMA_ORDER
 	trace_hfi1_sdma_out_sn(sde, txp->sn);
 	if (WARN_ON_ONCE(sde->head_sn != txp->sn))
@@ -593,6 +591,8 @@ static void sdma_flush_descq(struct sdma_engine *sde)
 		head = ++sde->descq_head & sde->sdma_mask;
 		/* if now past this txp's descs, do the callback */
 		if (txp && txp->next_descq_idx == head) {
+			/* remove from list */
+			sde->tx_ring[sde->tx_head++ & sde->sdma_mask] = NULL;
 			complete_tx(sde, txp, SDMA_TXREQ_S_ABORTED);
 			trace_hfi1_sdma_progress(sde, head, tail, txp);
 			txp = get_txhead(sde);
@@ -1493,6 +1493,8 @@ retry:
 
 		/* if now past this txp's descs, do the callback */
 		if (txp && txp->next_descq_idx == swhead) {
+			/* remove from list */
+			sde->tx_ring[sde->tx_head++ & sde->sdma_mask] = NULL;
 			complete_tx(sde, txp, SDMA_TXREQ_S_OK);
 			/* see if there is another txp */
 			txp = get_txhead(sde);
@@ -2712,22 +2714,21 @@ static int _extend_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx)
 			tx->coalesce_buf = kmalloc(tx->tlen + sizeof(u32),
 						   GFP_ATOMIC);
 			if (!tx->coalesce_buf)
-				return -ENOMEM;
-
+				goto enomem;
 			tx->coalesce_idx = 0;
 		}
 		return 0;
 	}
 
 	if (unlikely(tx->num_desc == MAX_DESC))
-		return -ENOMEM;
+		goto enomem;
 
 	tx->descp = kmalloc_array(
 			MAX_DESC,
 			sizeof(struct sdma_desc),
 			GFP_ATOMIC);
 	if (!tx->descp)
-		return -ENOMEM;
+		goto enomem;
 
 	/* reserve last descriptor for coalescing */
 	tx->desc_limit = MAX_DESC - 1;
@@ -2735,6 +2736,9 @@ static int _extend_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx)
 	for (i = 0; i < tx->num_desc; i++)
 		tx->descp[i] = tx->descs[i];
 	return 0;
+enomem:
+	sdma_txclean(dd, tx);
+	return -ENOMEM;
 }
 
 /*

@@ -67,86 +67,80 @@
 static int read_efi_var(const char *name, unsigned long *size,
 			void **return_data)
 {
+	efi_status_t status;
+	efi_char16_t *uni_name;
+	efi_guid_t guid;
+	unsigned long temp_size;
+	void *temp_buffer;
+	void *data;
+	int i;
 	int ret;
 
 	/* set failure return values */
 	*size = 0;
 	*return_data = NULL;
 
+	if (!efi_enabled(EFI_RUNTIME_SERVICES))
+		return -EOPNOTSUPP;
+
+	uni_name = kzalloc(sizeof(efi_char16_t) * (strlen(name) + 1),
+			   GFP_KERNEL);
+	temp_buffer = kzalloc(EFI_DATA_SIZE, GFP_KERNEL);
+
+	if (!uni_name || !temp_buffer) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	/* input: the size of the buffer */
+	temp_size = EFI_DATA_SIZE;
+
+	/* convert ASCII to unicode - it is a 1:1 mapping */
+	for (i = 0; name[i]; i++)
+		uni_name[i] = name[i];
+
+	/* need a variable for our GUID */
+	guid = HFI1_EFIVAR_GUID;
+
+	/* call into EFI runtime services */
+	status = efi.get_variable(
+			uni_name,
+			&guid,
+			NULL,
+			&temp_size,
+			temp_buffer);
+
 	/*
-	 * Use EFI run-time support to obtain an EFI variable.  Support may
-	 * be compiled out, so declare all variables inside.
+	 * It would be nice to call efi_status_to_err() here, but that
+	 * is in the EFIVAR_FS code and may not be compiled in.
+	 * However, even that is insufficient since it does not cover
+	 * EFI_BUFFER_TOO_SMALL which could be an important return.
+	 * For now, just split out succces or not found.
 	 */
-	if (efi_enabled(EFI_RUNTIME_SERVICES)) {
-		efi_status_t status;
-		efi_char16_t *uni_name;
-		efi_guid_t guid;
-		unsigned long temp_size;
-		void *temp_buffer;
-		void *data;
-		int i;
+	ret = status == EFI_SUCCESS   ? 0 :
+	      status == EFI_NOT_FOUND ? -ENOENT :
+					-EINVAL;
+	if (ret)
+		goto fail;
 
-		uni_name = kzalloc(sizeof(efi_char16_t) * (strlen(name) + 1),
-				   GFP_KERNEL);
-		temp_buffer = kzalloc(EFI_DATA_SIZE, GFP_KERNEL);
-		data = NULL;
+	/*
+	 * We have successfully read the EFI variable into our
+	 * temporary buffer.  Now allocate a correctly sized
+	 * buffer.
+	 */
+	data = kmalloc(temp_size, GFP_KERNEL);
+	if (!data) {
+		ret = -ENOMEM;
+		goto fail;
+	}
 
-		if (!uni_name || !temp_buffer) {
-			ret = -ENOMEM;
-			goto fail;
-		}
-
-		/* input: the size of the buffer */
-		temp_size = EFI_DATA_SIZE;
-
-		/* convert ASCII to unicode - it is a 1:1 mapping */
-		for (i = 0; name[i]; i++)
-			uni_name[i] = name[i];
-
-		/* need a variable for our GUID */
-		guid = HFI1_EFIVAR_GUID;
-
-		/* call into EFI runtime services */
-		status = efi.get_variable(
-				uni_name,
-				&guid,
-				NULL,
-				&temp_size,
-				temp_buffer);
-
-		/*
-		 * It would be nice to call efi_status_to_err() here, but that
-		 * is in the EFIVAR_FS code and may not be compiled in.
-		 * However, even that is insufficient since it does not cover
-		 * EFI_BUFFER_TOO_SMALL which could be an important return.
-		 * For now, just split out succces or not found.
-		 */
-		ret = status == EFI_SUCCESS   ? 0 :
-		      status == EFI_NOT_FOUND ? -ENOENT :
-						-EINVAL;
-
-		if (!ret) {
-			/*
-			 * We have successfully read the EFI variable into our
-			 * temporary buffer.  Now allocate a correctly sized
-			 * buffer.
-			 */
-			data = kmalloc(temp_size, GFP_KERNEL);
-			if (data) {
-				memcpy(data, temp_buffer, temp_size);
-				*size = temp_size;
-				*return_data = data;
-			} else {
-				ret = -ENOMEM;
-			}
-		}
+	memcpy(data, temp_buffer, temp_size);
+	*size = temp_size;
+	*return_data = data;
 
 fail:
-		kfree(uni_name);
-		kfree(temp_buffer);
-	} else {
-		ret = -ENOSYS;
-	}
+	kfree(uni_name);
+	kfree(temp_buffer);
 
 	return ret;
 }
@@ -170,7 +164,6 @@ int read_hfi1_efi_var(struct hfi1_devdata *dd, const char *kind,
 		 PCI_SLOT(dd->pcidev->devfn),
 		 PCI_FUNC(dd->pcidev->devfn),
 		 kind);
-	name[sizeof(name) - 1] = 0; /* make sure the string is terminated */
 
 	return read_efi_var(name, size, return_data);
 }

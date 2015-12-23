@@ -83,10 +83,10 @@
  * Number of user receive contexts we are configured to use (to allow for more
  * pio buffers per ctxt, etc.)  Zero means use one user context per CPU.
  */
-uint num_rcv_contexts;
-module_param_named(num_rcv_contexts, num_rcv_contexts, uint, S_IRUGO);
+int num_user_contexts = -1;
+module_param_named(num_user_contexts, num_user_contexts, uint, S_IRUGO);
 MODULE_PARM_DESC(
-	num_rcv_contexts, "Set max number of user receive contexts to use");
+	num_user_contexts, "Set max number of user contexts to use");
 
 uint krcvqs[RXE_NUM_DATA_VL];
 int krcvqsset;
@@ -114,7 +114,7 @@ MODULE_PARM_DESC(hdrq_entsize, "Size of header queue entries: 2 - 8B, 16 - 64B (
 
 unsigned int user_credit_return_threshold = 33;	/* default is 33% */
 module_param(user_credit_return_threshold, uint, S_IRUGO);
-MODULE_PARM_DESC(user_credit_return_theshold, "Credit return threshold for user send contexts, return when unreturned credits passes this many blocks (in percent of allocated blocks, 0 is off)");
+MODULE_PARM_DESC(user_credit_return_threshold, "Credit return threshold for user send contexts, return when unreturned credits passes this many blocks (in percent of allocated blocks, 0 is off)");
 
 static inline u64 encode_rcv_header_entry_size(u16);
 
@@ -1353,6 +1353,7 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	int ret = 0, j, pidx, initfail;
 	struct hfi1_devdata *dd = NULL;
+	struct hfi1_pportdata *ppd;
 
 	/* First, lock the non-writable module parameters */
 	HFI1_CAP_LOCK();
@@ -1367,6 +1368,7 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (!encode_rcv_header_entry_size(hfi1_hdrq_entsize)) {
 		hfi1_early_err(&pdev->dev, "Invalid HdrQ Entry size %u\n",
 			       hfi1_hdrq_entsize);
+		ret = -EINVAL;
 		goto bail;
 	}
 
@@ -1448,8 +1450,14 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (initfail || ret) {
 		stop_timers(dd);
 		flush_workqueue(ib_wq);
-		for (pidx = 0; pidx < dd->num_pports; ++pidx)
+		for (pidx = 0; pidx < dd->num_pports; ++pidx) {
 			hfi1_quiet_serdes(dd->pport + pidx);
+			ppd = dd->pport + pidx;
+			if (ppd->hfi1_wq) {
+				destroy_workqueue(ppd->hfi1_wq);
+				ppd->hfi1_wq = NULL;
+			}
+		}
 		if (!j)
 			hfi1_device_remove(dd);
 		if (!ret)

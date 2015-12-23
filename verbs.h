@@ -788,6 +788,8 @@ struct hfi1_ibdev {
 	spinlock_t n_srqs_lock;
 	u32 n_mcast_grps_allocated; /* number of mcast groups allocated */
 	spinlock_t n_mcast_grps_lock;
+	u32 n_rc_qps;
+	u32 busy_jiffies;
 #ifdef CONFIG_DEBUG_FS
 	/* per HFI debugfs */
 	struct dentry *hfi1_ibdev_dbg;

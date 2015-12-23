@@ -9328,6 +9328,10 @@ static void init_qsfp_int(struct hfi1_devdata *dd)
  */
 static void init_lcb(struct hfi1_devdata *dd)
 {
+	/* simulator does not correctly handle LCB cclk loopback, skip */
+	if (dd->icode == ICODE_FUNCTIONAL_SIMULATOR)
+		return;
+
 	/* the DC has been reset earlier in the driver load */
 
 	/* set LCB for cclk loopback on the port */
@@ -9825,9 +9829,10 @@ static int goto_offline(struct hfi1_pportdata *ppd, u8 rem_reason)
 	 * depending on how the link went down.  The 8051 firmware
 	 * will observe the needed wait time and only move to ready
 	 * when that is completed.  The largest of the quiet timeouts
-	 * is 2.5s, so wait that long and then a bit more.
+	 * is 6s, so wait that long and then at least 0.5s more for
+	 * other transitions, and another 0.5s for a buffer.
 	 */
-	ret = wait_fm_ready(dd, 3000);
+	ret = wait_fm_ready(dd, 7000);
 	if (ret) {
 		dd_dev_err(dd,
 			   "After going offline, timed out waiting for the 8051 to become ready to accept host requests\n");
@@ -10740,8 +10745,7 @@ static int set_buffer_control(struct hfi1_pportdata *ppd,
 		new_bc->vl[i].shared = 0;
 	}
 	new_total += be16_to_cpu(new_bc->overall_shared_limit);
-	if (new_total > (u32)dd->link_credits)
-		return -EINVAL;
+
 	/* fetch the current values */
 	get_buffer_control(dd, &cur_bc, &cur_total);
 
@@ -11807,6 +11811,8 @@ static int init_cntrs(struct hfi1_devdata *dd)
 	char *p;
 	char name[C_MAX_NAME];
 	struct hfi1_pportdata *ppd;
+	const char *bit_type_32 = ",32";
+	const int bit_type_32_sz = strlen(bit_type_32);
 
 	/* set up the stats timer; the add_timer is done at the end */
 	init_timer(&dd->synth_stats_timer);
@@ -11837,6 +11843,9 @@ static int init_cntrs(struct hfi1_devdata *dd)
 					 dev_cntrs[i].name,
 					 vl_from_idx(j));
 				sz += strlen(name);
+				/* Add ",32" for 32-bit counters */
+				if (dev_cntrs[i].flags & CNTR_32BIT)
+					sz += bit_type_32_sz;
 				sz++;
 				hfi1_dbg_early("\t\t%s\n", name);
 				dd->ndevcntrs++;
@@ -11851,13 +11860,19 @@ static int init_cntrs(struct hfi1_devdata *dd)
 				snprintf(name, C_MAX_NAME, "%s%d",
 					 dev_cntrs[i].name, j);
 				sz += strlen(name);
+				/* Add ",32" for 32-bit counters */
+				if (dev_cntrs[i].flags & CNTR_32BIT)
+					sz += bit_type_32_sz;
 				sz++;
 				hfi1_dbg_early("\t\t%s\n", name);
 				dd->ndevcntrs++;
 			}
 		} else {
-			/* +1 for newline  */
+			/* +1 for newline. */
 			sz += strlen(dev_cntrs[i].name) + 1;
+			/* Add ",32" for 32-bit counters */
+			if (dev_cntrs[i].flags & CNTR_32BIT)
+				sz += bit_type_32_sz;
 			dev_cntrs[i].offset = dd->ndevcntrs;
 			dd->ndevcntrs++;
 			hfi1_dbg_early("\tAdding %s\n", dev_cntrs[i].name);
@@ -11891,6 +11906,13 @@ static int init_cntrs(struct hfi1_devdata *dd)
 					 vl_from_idx(j));
 				memcpy(p, name, strlen(name));
 				p += strlen(name);
+
+				/* Counter is 32 bits */
+				if (dev_cntrs[i].flags & CNTR_32BIT) {
+					memcpy(p, bit_type_32, bit_type_32_sz);
+					p += bit_type_32_sz;
+				}
+
 				*p++ = '\n';
 			}
 		} else if (dev_cntrs[i].flags & CNTR_SDMA) {
@@ -11900,11 +11922,25 @@ static int init_cntrs(struct hfi1_devdata *dd)
 					 dev_cntrs[i].name, j);
 				memcpy(p, name, strlen(name));
 				p += strlen(name);
+
+				/* Counter is 32 bits */
+				if (dev_cntrs[i].flags & CNTR_32BIT) {
+					memcpy(p, bit_type_32, bit_type_32_sz);
+					p += bit_type_32_sz;
+				}
+
 				*p++ = '\n';
 			}
 		} else {
 			memcpy(p, dev_cntrs[i].name, strlen(dev_cntrs[i].name));
 			p += strlen(dev_cntrs[i].name);
+
+			/* Counter is 32 bits */
+			if (dev_cntrs[i].flags & CNTR_32BIT) {
+				memcpy(p, bit_type_32, bit_type_32_sz);
+				p += bit_type_32_sz;
+			}
+
 			*p++ = '\n';
 		}
 	}
@@ -11943,13 +11979,19 @@ static int init_cntrs(struct hfi1_devdata *dd)
 					 port_cntrs[i].name,
 					 vl_from_idx(j));
 				sz += strlen(name);
+				/* Add ",32" for 32-bit counters */
+				if (port_cntrs[i].flags & CNTR_32BIT)
+					sz += bit_type_32_sz;
 				sz++;
 				hfi1_dbg_early("\t\t%s\n", name);
 				dd->nportcntrs++;
 			}
 		} else {
-			/* +1 for newline  */
+			/* +1 for newline */
 			sz += strlen(port_cntrs[i].name) + 1;
+			/* Add ",32" for 32-bit counters */
+			if (port_cntrs[i].flags & CNTR_32BIT)
+				sz += bit_type_32_sz;
 			port_cntrs[i].offset = dd->nportcntrs;
 			dd->nportcntrs++;
 			hfi1_dbg_early("\tAdding %s\n", port_cntrs[i].name);
@@ -11975,12 +12017,26 @@ static int init_cntrs(struct hfi1_devdata *dd)
 					 vl_from_idx(j));
 				memcpy(p, name, strlen(name));
 				p += strlen(name);
+
+				/* Counter is 32 bits */
+				if (port_cntrs[i].flags & CNTR_32BIT) {
+					memcpy(p, bit_type_32, bit_type_32_sz);
+					p += bit_type_32_sz;
+				}
+
 				*p++ = '\n';
 			}
 		} else {
 			memcpy(p, port_cntrs[i].name,
 			       strlen(port_cntrs[i].name));
 			p += strlen(port_cntrs[i].name);
+
+			/* Counter is 32 bits */
+			if (port_cntrs[i].flags & CNTR_32BIT) {
+				memcpy(p, bit_type_32, bit_type_32_sz);
+				p += bit_type_32_sz;
+			}
+
 			*p++ = '\n';
 		}
 	}
@@ -12629,7 +12685,6 @@ fail:
 static int set_up_context_variables(struct hfi1_devdata *dd)
 {
 	int num_kernel_contexts;
-	int num_user_contexts;
 	int total_contexts;
 	int ret;
 	unsigned ngroups;
@@ -12666,12 +12721,10 @@ static int set_up_context_variables(struct hfi1_devdata *dd)
 	}
 	/*
 	 * User contexts: (to be fixed later)
-	 *	- set to num_rcv_contexts if non-zero
-	 *	- default to 1 user context per CPU
+	 *	- default to 1 user context per CPU if num_user_contexts is
+	 *	  negative
 	 */
-	if (num_rcv_contexts)
-		num_user_contexts = num_rcv_contexts;
-	else
+	if (num_user_contexts < 0)
 		num_user_contexts = num_online_cpus();
 
 	total_contexts = num_kernel_contexts + num_user_contexts;
@@ -13564,6 +13617,8 @@ static void init_qos(struct hfi1_devdata *dd, u32 first_ctxt)
 	if (num_vls * qpns_per_vl > dd->chip_rcv_contexts)
 		goto bail;
 	rsmmap = kmalloc_array(NUM_MAP_REGS, sizeof(u64), GFP_KERNEL);
+	if (!rsmmap)
+		goto bail;
 	memset(rsmmap, rxcontext, NUM_MAP_REGS * sizeof(u64));
 	/* init the local copy of the table */
 	for (i = 0, ctxt = first_ctxt; i < num_vls; i++) {

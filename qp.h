@@ -315,9 +315,13 @@ static inline u32 qp_get_savail(struct hfi1_qp *qp)
  */
 static inline void add_retry_timer(struct hfi1_qp *qp)
 {
+	struct ib_qp *ibqp = &qp->ibqp;
+	struct hfi1_ibdev *dev = to_idev(ibqp->device);
+
 	qp->s_flags |= HFI1_S_TIMER;
 	/* 4.096 usec. * (1 << qp->timeout) */
-	qp->s_timer.expires = jiffies + qp->timeout_jiffies;
+	qp->s_timer.expires = jiffies + qp->timeout_jiffies
+				+ dev->busy_jiffies;
 	add_timer(&qp->s_timer);
 }
 
@@ -343,10 +347,14 @@ static inline void add_rnr_timer(struct hfi1_qp *qp, unsigned long to)
  */
 static inline void mod_retry_timer(struct hfi1_qp *qp)
 {
+	struct ib_qp *ibqp = &qp->ibqp;
+	struct hfi1_ibdev *dev = to_idev(ibqp->device);
+
 	qp->s_flags |= HFI1_S_TIMER;
-	qp->s_timer.function = hfi1_rc_timeout;
 	/* 4.096 usec. * (1 << qp->timeout) */
-	mod_timer(&qp->s_timer, jiffies + qp->timeout_jiffies);
+	qp->s_timer.function = hfi1_rc_timeout;
+	mod_timer(&qp->s_timer, jiffies + qp->timeout_jiffies
+				+ dev->busy_jiffies);
 }
 
 /**

@@ -291,7 +291,7 @@ int hfi1_ruc_check_hdr(struct hfi1_ibport *ibp, struct hfi1_ib_header *hdr,
 		}
 		if (unlikely(rcv_pkey_check(ppd_from_ibp(ibp), (u16)bth0,
 					    sc5, be16_to_cpu(hdr->lrh[3])))) {
-			hfi1_bad_pqkey(ibp, IB_NOTICE_TRAP_BAD_PKEY,
+			hfi1_bad_pqkey(ibp, OPA_TRAP_BAD_P_KEY,
 				       (u16)bth0,
 				       (be16_to_cpu(hdr->lrh[0]) >> 4) & 0xF,
 				       0, qp->ibqp.qp_num,
@@ -325,7 +325,7 @@ int hfi1_ruc_check_hdr(struct hfi1_ibport *ibp, struct hfi1_ib_header *hdr,
 		}
 		if (unlikely(rcv_pkey_check(ppd_from_ibp(ibp), (u16)bth0,
 					    sc5, be16_to_cpu(hdr->lrh[3])))) {
-			hfi1_bad_pqkey(ibp, IB_NOTICE_TRAP_BAD_PKEY,
+			hfi1_bad_pqkey(ibp, OPA_TRAP_BAD_P_KEY,
 				       (u16)bth0,
 				       (be16_to_cpu(hdr->lrh[0]) >> 4) & 0xF,
 				       0, qp->ibqp.qp_num,
@@ -599,7 +599,7 @@ rnr_nak:
 	spin_lock_irqsave(&sqp->s_lock, flags);
 	if (!(ib_hfi1_state_ops[sqp->state] & HFI1_PROCESS_RECV_OK))
 		goto clr_busy;
-	to = usecs_to_jiffies(ib_hfi1_rnr_table[qp->r_min_rnr_timer]);
+	to = ib_hfi1_rnr_table[qp->r_min_rnr_timer];
 	add_rnr_timer(sqp, to);
 	goto clr_busy;
 
@@ -819,26 +819,38 @@ void hfi1_do_send(struct work_struct *work)
 	int (*make_req)(struct hfi1_qp *qp, struct hfi1_pkt_state *ps);
 	unsigned long flags;
 	unsigned long timeout;
+	unsigned long timeout_int;
+	int cpu;
 
 	ps.dev = to_idev(qp->ibqp.device);
 	ps.ibp = to_iport(qp->ibqp.device, qp->port_num);
 	ps.ppd = ppd_from_ibp(ps.ibp);
 
-	if ((qp->ibqp.qp_type == IB_QPT_RC ||
-	     qp->ibqp.qp_type == IB_QPT_UC) &&
-	    !loopback &&
-	    (qp->remote_ah_attr.dlid & ~((1 << ps.ppd->lmc) - 1)) ==
-	    ps.ppd->lid) {
-		ruc_loopback(qp);
-		return;
-	}
-
-	if (qp->ibqp.qp_type == IB_QPT_RC)
+	switch (qp->ibqp.qp_type) {
+	case IB_QPT_RC:
+		if (!loopback && ((qp->remote_ah_attr.dlid & ~((1 << ps.ppd->lmc
+								) - 1)) ==
+				 ps.ppd->lid)) {
+			ruc_loopback(qp);
+			return;
+		}
 		make_req = hfi1_make_rc_req;
-	else if (qp->ibqp.qp_type == IB_QPT_UC)
+		timeout_int = (qp->timeout_jiffies);
+		break;
+	case IB_QPT_UC:
+		if (!loopback && ((qp->remote_ah_attr.dlid & ~((1 << ps.ppd->lmc
+								) - 1)) ==
+				 ps.ppd->lid)) {
+			ruc_loopback(qp);
+			return;
+		}
 		make_req = hfi1_make_uc_req;
-	else
+		timeout_int = SEND_RESCHED_TIMEOUT;
+		break;
+	default:
 		make_req = hfi1_make_ud_req;
+		timeout_int = SEND_RESCHED_TIMEOUT;
+	}
 
 	spin_lock_irqsave(&qp->s_lock, flags);
 
@@ -850,9 +862,11 @@ void hfi1_do_send(struct work_struct *work)
 
 	qp->s_flags |= HFI1_S_BUSY;
 
-	timeout = jiffies + SEND_RESCHED_TIMEOUT;
 	/* insure a pre-built packet is handled  */
 	ps.s_txreq = get_waiting_verbs_txreq(qp);
+	timeout = jiffies + (timeout_int) / 8;
+	cpu = qp->s_sde ? qp->s_sde->cpu :
+			cpumask_first(cpumask_of_node(ps.ppd->dd->node));
 	do {
 		/* Check for a constructed packet to be sent. */
 		if (qp->s_hdrwords != 0) {
@@ -867,9 +881,19 @@ void hfi1_do_send(struct work_struct *work)
 			qp->s_hdrwords = 0;
 			/* allow other tasks to run */
 			if (unlikely(time_after(jiffies, timeout))) {
+				if (workqueue_congested(cpu, ps.ppd->hfi1_wq)) {
+					spin_lock_irqsave(&qp->s_lock, flags);
+					qp->s_flags &= ~HFI1_S_BUSY;
+					hfi1_schedule_send(qp);
+					spin_unlock_irqrestore(&qp->s_lock,
+							       flags);
+					this_cpu_inc(*ps.ppd->dd->send_schedule
+						     );
+					return;
+				}
 				cond_resched();
 				this_cpu_inc(*ps.ppd->dd->send_schedule);
-				timeout = jiffies + SEND_RESCHED_TIMEOUT;
+				timeout = jiffies + (timeout_int) / 8;
 			}
 			spin_lock_irqsave(&qp->s_lock, flags);
 		}

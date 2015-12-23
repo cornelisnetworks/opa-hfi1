@@ -1151,7 +1151,7 @@ struct hfi1_devdata {
 	struct hfi1_affinity *affinity;
 
 	/* receive context tail dummy address */
-	volatile __le64 *rcvhdrtail_dummy_kvaddr;
+	__le64 *rcvhdrtail_dummy_kvaddr;
 	dma_addr_t rcvhdrtail_dummy_physaddr;
 
 	bool aspm_supported;	/* Does HW support ASPM */
@@ -1192,16 +1192,6 @@ struct hfi1_filedata {
 	spinlock_t invalid_lock;
 	int (*mmu_rb_insert)(struct rb_root *, struct mmu_rb_node *);
 };
-
-/* for use in system calls, where we want to know device type, etc. */
-#define fp_to_fd(fp) ((struct hfi1_filedata *)(fp)->private_data)
-#define ctxt_fp(fp) (fp_to_fd((fp))->uctxt)
-#define subctxt_fp(fp) (fp_to_fd((fp))->subctxt)
-#define tidcursor_fp(fp) (fp_to_fd((fp))->tidcursor)
-#define user_sdma_pkt_fp(fp) (fp_to_fd((fp))->pq)
-#define user_sdma_comp_fp(fp) (fp_to_fd((fp))->cq)
-#define notifier_fp(fp) (fp_to_fd((fp))->mn)
-#define rb_fp(fp) (fp_to_fd((fp))->tid_rb_root)
 
 extern struct list_head hfi1_dev_list;
 extern spinlock_t hfi1_devs_lock;
@@ -1744,7 +1734,7 @@ void update_sge(struct hfi1_sge_state *ss, u32 length);
 extern unsigned int hfi1_max_mtu;
 extern unsigned int hfi1_cu;
 extern unsigned int user_credit_return_threshold;
-extern uint num_rcv_contexts;
+extern int num_user_contexts;
 extern unsigned n_krcvqs;
 extern uint krcvqs[];
 extern int krcvqsset;

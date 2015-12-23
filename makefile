@@ -39,9 +39,9 @@ BASEVERSION=0.2
 VERSION = 0.10
 # The desired release number comes the git describe following the version which
 # is the number of commits since the version tag was planted suffixed by the g<commitid>
-RELEASE = 80
+RELEASE = 128
 
-EXCLUDES = --exclude-vcs --exclude-backups --exclude='*.patch' --exclude='*.swp' --exclude='series' --exclude='*.orig' --exclude=hfi.spec.in
+EXCLUDES = --exclude-vcs --exclude-backups --exclude='include' --exclude='test' --exclude='scripts' --exclude='*.patch' --exclude='*.swp' --exclude='series' --exclude='*.orig' --exclude=hfi.spec.in --exclude=makesrpm.sh
 
 NAME = hfi1
 

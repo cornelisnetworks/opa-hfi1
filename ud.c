@@ -112,7 +112,7 @@ static void ud_loopback(struct hfi1_qp *sqp, struct hfi1_swqe *swqe)
 				   ((1 << ppd->lmc) - 1));
 		if (unlikely(ingress_pkey_check(ppd, pkey, sc5,
 						qp->s_pkey_index, slid))) {
-			hfi1_bad_pqkey(ibp, IB_NOTICE_TRAP_BAD_PKEY, pkey,
+			hfi1_bad_pqkey(ibp, OPA_TRAP_BAD_P_KEY, pkey,
 				       ah_attr->sl,
 				       sqp->ibqp.qp_num, qp->ibqp.qp_num,
 				       cpu_to_be16(slid),
@@ -136,7 +136,7 @@ static void ud_loopback(struct hfi1_qp *sqp, struct hfi1_swqe *swqe)
 
 			lid = ppd->lid | (ah_attr->src_path_bits &
 					  ((1 << ppd->lmc) - 1));
-			hfi1_bad_pqkey(ibp, IB_NOTICE_TRAP_BAD_QKEY, qkey,
+			hfi1_bad_pqkey(ibp, OPA_TRAP_BAD_Q_KEY, qkey,
 				       ah_attr->sl,
 				       sqp->ibqp.qp_num, qp->ibqp.qp_num,
 				       cpu_to_be16(lid),
@@ -757,7 +757,7 @@ void hfi1_ud_rcv(struct hfi1_packet *packet)
 				 * for invalid pkeys is optional according to
 				 * IB spec (release 1.3, section 10.9.4)
 				 */
-				hfi1_bad_pqkey(ibp, IB_NOTICE_TRAP_BAD_PKEY,
+				hfi1_bad_pqkey(ibp, OPA_TRAP_BAD_P_KEY,
 					       pkey,
 					       (be16_to_cpu(hdr->lrh[0]) >> 4) &
 						0xF,
@@ -772,7 +772,7 @@ void hfi1_ud_rcv(struct hfi1_packet *packet)
 				goto drop;
 		}
 		if (unlikely(qkey != qp->qkey)) {
-			hfi1_bad_pqkey(ibp, IB_NOTICE_TRAP_BAD_QKEY, qkey,
+			hfi1_bad_pqkey(ibp, OPA_TRAP_BAD_Q_KEY, qkey,
 				       (be16_to_cpu(hdr->lrh[0]) >> 4) & 0xF,
 				       src_qp, qp->ibqp.qp_num,
 				       hdr->lrh[3], hdr->lrh[1]);

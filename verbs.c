@@ -125,7 +125,7 @@ unsigned int hfi1_max_srq_wrs = 0x1FFFF;
 module_param_named(max_srq_wrs, hfi1_max_srq_wrs, uint, S_IRUGO);
 MODULE_PARM_DESC(max_srq_wrs, "Maximum number of SRQ WRs support");
 
-static unsigned short piothreshold;
+static unsigned short piothreshold = 256;
 module_param(piothreshold, ushort, S_IRUGO);
 MODULE_PARM_DESC(piothreshold, "size used to determine sdma vs. pio");
 
@@ -370,7 +370,9 @@ void hfi1_skip_sge(struct hfi1_sge_state *ss, u32 length, int release)
  * @qp: the QP to post on
  * @wr: the work request to send
  */
-static int post_one_send(struct hfi1_qp *qp, struct ib_send_wr *wr)
+static int post_one_send(struct hfi1_qp *qp,
+			 struct ib_send_wr *wr,
+			 int *call_send)
 {
 	struct hfi1_swqe *wqe;
 	u32 next;
@@ -495,7 +497,8 @@ static int post_one_send(struct hfi1_qp *qp, struct ib_send_wr *wr)
 	smp_wmb(); /* see request builders */
 	qp->s_avail--;
 	qp->s_head = next;
-
+	if (wqe->length <= piothreshold)
+		*call_send = 1;
 	return 0;
 
 bail_inval_free:
@@ -537,7 +540,7 @@ static int post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 	call_send = qp->s_head == ACCESS_ONCE(qp->s_last) && !wr->next;
 
 	for (; wr; wr = wr->next) {
-		err = post_one_send(qp, wr);
+		err = post_one_send(qp, wr, &call_send);
 		if (unlikely(err)) {
 			*bad_wr = wr;
 			goto bail;
@@ -546,10 +549,12 @@ static int post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 	}
 bail:
 	spin_unlock_irqrestore(&qp->s_hlock, flags);
-	if (nreq && !call_send)
-		_hfi1_schedule_send(qp);
-	if (nreq && call_send)
-		hfi1_do_send(&qp->s_iowait.iowork);
+	if (nreq) {
+		if (call_send)
+			hfi1_do_send(&qp->s_iowait.iowork);
+		else
+			_hfi1_schedule_send(qp);
+	}
 	return err;
 }
 
@@ -992,8 +997,6 @@ bail_ecomm:
 	/* The current one got "sent" */
 	return 0;
 bail_build:
-	/* kmalloc or mapping fail */
-	hfi1_put_txreq(tx);
 	return wait_kmem(dev, qp, ps);
 }
 
@@ -1100,7 +1103,7 @@ int hfi1_verbs_send_pio(struct hfi1_qp *qp, struct hfi1_pkt_state *ps,
 	pbuf = sc_buffer_alloc(sc, plen, cb, qp);
 	if (unlikely(!pbuf)) {
 		if (cb)
-			iowait_pio_dec(&qp->s_iowait);
+			verbs_pio_complete(qp, 0);
 		if (ppd->host_link_state != HLS_UP_ACTIVE) {
 			/*
 			 * If we have filled the PIO buffers to capacity and are
