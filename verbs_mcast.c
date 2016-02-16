@@ -303,15 +303,13 @@ int hfi1_multicast_detach(struct ib_qp *ibqp, union ib_gid *gid, u16 lid)
 	struct hfi1_ibdev *dev = to_idev(ibqp->device);
 	struct hfi1_ibport *ibp = to_iport(ibqp->device, qp->port_num);
 	struct hfi1_mcast *mcast = NULL;
-	struct hfi1_mcast_qp *p, *tmp;
+	struct hfi1_mcast_qp *p, *tmp, *delp = NULL;
 	struct rb_node *n;
 	int last = 0;
 	int ret;
 
-	if (ibqp->qp_num <= 1 || qp->state == IB_QPS_RESET) {
-		ret = -EINVAL;
-		goto bail;
-	}
+	if (ibqp->qp_num <= 1 || qp->state == IB_QPS_RESET)
+		return -EINVAL;
 
 	spin_lock_irq(&ibp->lock);
 
@@ -320,8 +318,7 @@ int hfi1_multicast_detach(struct ib_qp *ibqp, union ib_gid *gid, u16 lid)
 	while (1) {
 		if (!n) {
 			spin_unlock_irq(&ibp->lock);
-			ret = -EINVAL;
-			goto bail;
+			return -EINVAL;
 		}
 
 		mcast = rb_entry(n, struct hfi1_mcast, rb_node);
@@ -345,6 +342,7 @@ int hfi1_multicast_detach(struct ib_qp *ibqp, union ib_gid *gid, u16 lid)
 		 */
 		list_del_rcu(&p->list);
 		mcast->n_attached--;
+		delp = p;
 
 		/* If this was the last attached QP, remove the GID too. */
 		if (list_empty(&mcast->qp_list)) {
@@ -356,14 +354,15 @@ int hfi1_multicast_detach(struct ib_qp *ibqp, union ib_gid *gid, u16 lid)
 
 	spin_unlock_irq(&ibp->lock);
 
-	if (p) {
+	if (!delp)
+		return -EINVAL;
 		/*
 		 * Wait for any list walkers to finish before freeing the
 		 * list element.
 		 */
-		wait_event(mcast->wait, atomic_read(&mcast->refcount) <= 1);
-		mcast_qp_free(p);
-	}
+	wait_event(mcast->wait, atomic_read(&mcast->refcount) <= 1);
+	mcast_qp_free(delp);
+
 	if (last) {
 		atomic_dec(&mcast->refcount);
 		wait_event(mcast->wait, !atomic_read(&mcast->refcount));
@@ -373,10 +372,7 @@ int hfi1_multicast_detach(struct ib_qp *ibqp, union ib_gid *gid, u16 lid)
 		spin_unlock_irq(&dev->n_mcast_grps_lock);
 	}
 
-	ret = 0;
-
-bail:
-	return ret;
+	return 0;
 }
 
 int hfi1_mcast_tree_empty(struct hfi1_ibport *ibp)

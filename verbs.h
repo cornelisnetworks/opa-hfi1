@@ -864,7 +864,7 @@ static inline int hfi1_send_ok(struct hfi1_qp *qp)
  * This must be called with s_lock held.
  */
 void hfi1_bad_pqkey(struct hfi1_ibport *ibp, __be16 trap_num, u32 key, u32 sl,
-		    u32 qp1, u32 qp2, __be16 lid1, __be16 lid2);
+		    u32 qp1, u32 qp2, u16 lid1, u16 lid2);
 void hfi1_cap_mask_chg(struct hfi1_ibport *ibp);
 void hfi1_sys_guid_chg(struct hfi1_ibport *ibp);
 void hfi1_node_desc_chg(struct hfi1_ibport *ibp);
@@ -946,7 +946,7 @@ void hfi1_put_txreq(struct verbs_txreq *tx);
 int hfi1_verbs_send(struct hfi1_qp *qp, struct hfi1_pkt_state *ps);
 
 void hfi1_copy_sge(struct hfi1_sge_state *ss, void *data, u32 length,
-		   int release);
+		   int release, int copy_last);
 
 void hfi1_skip_sge(struct hfi1_sge_state *ss, u32 length, int release);
 

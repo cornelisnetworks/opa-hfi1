@@ -418,7 +418,7 @@ static ssize_t hfi1_file_write(struct file *fp, const char __user *data,
 	case HFI1_CMD_EP_ERASE_RANGE:
 	case HFI1_CMD_EP_READ_RANGE:
 	case HFI1_CMD_EP_WRITE_RANGE:
-		ret = handle_eprom_command(&cmd);
+		ret = handle_eprom_command(fp, &cmd);
 		break;
 	}
 
@@ -785,6 +785,7 @@ static int hfi1_file_close(struct inode *inode, struct file *fp)
 	hfi1_rcvctrl(dd, HFI1_RCVCTRL_CTXT_DIS |
 		     HFI1_RCVCTRL_TIDFLOW_DIS |
 		     HFI1_RCVCTRL_INTRAVAIL_DIS |
+		     HFI1_RCVCTRL_TAILUPD_DIS |
 		     HFI1_RCVCTRL_ONE_PKT_EGR_DIS |
 		     HFI1_RCVCTRL_NO_RHQ_DROP_DIS |
 		     HFI1_RCVCTRL_NO_EGR_DROP_DIS, uctxt->ctxt);
@@ -1199,8 +1200,16 @@ static int user_init(struct file *fp)
 		rcvctrl_ops |= HFI1_RCVCTRL_NO_EGR_DROP_ENB;
 	if (HFI1_CAP_KGET_MASK(uctxt->flags, NODROP_RHQ_FULL))
 		rcvctrl_ops |= HFI1_RCVCTRL_NO_RHQ_DROP_ENB;
+	/*
+	 * The RcvCtxtCtrl.TailUpd bit has to be explicitly written.
+	 * We can't rely on the correct value to be set from prior
+	 * uses of the chip or ctxt. Therefore, add the rcvctrl op
+	 * for both cases.
+	 */
 	if (HFI1_CAP_KGET_MASK(uctxt->flags, DMA_RTAIL))
 		rcvctrl_ops |= HFI1_RCVCTRL_TAILUPD_ENB;
+	else
+		rcvctrl_ops |= HFI1_RCVCTRL_TAILUPD_DIS;
 	hfi1_rcvctrl(uctxt->dd, rcvctrl_ops, uctxt->ctxt);
 
 	/* Notify any waiting slaves */

@@ -147,8 +147,9 @@ struct opa_mad_notice_attr {
 		struct {
 			__be32	lid;
 		} __packed ntc_2048;
+	};
+	u8	class_data[0];
 
-	} details;
 };
 
 /*
@@ -171,6 +172,17 @@ struct opa_mad_notice_attr {
 #define	OPA_TRAP_BAD_Q_KEY			cpu_to_be16(258)
 #define	OPA_TRAP_SWITCH_BAD_PKEY		cpu_to_be16(259)
 #define	OPA_SMA_TRAP_DATA_LINK_WIDTH		cpu_to_be16(2048)
+
+/*
+ * Generic trap/notice other local changes flags (trap 144).
+ */
+#define	OPA_NOTICE_TRAP_LWDE_CHG	0x08	/*
+						 * Link Width Downgrade Enable
+						 * changed
+						 */
+#define OPA_NOTICE_TRAP_LSE_CHG		0x04	/* Link Speed Enable changed */
+#define OPA_NOTICE_TRAP_LWE_CHG		0x02	/* Link Width Enable changed */
+#define OPA_NOTICE_TRAP_NODE_DESC_CHG	0x01
 
 #define OPA_MAX_PREEMPT_CAP         32
 #define OPA_VLARB_LOW_ELEMENTS       0

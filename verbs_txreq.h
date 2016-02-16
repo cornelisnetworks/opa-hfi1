@@ -107,6 +107,7 @@ static inline struct verbs_txreq *get_waiting_verbs_txreq(struct hfi1_qp *qp)
 	stx = iowait_get_txhead(&qp->s_iowait);
 	if (stx)
 		return container_of(stx, struct verbs_txreq, txreq);
+	qp->s_hdrwords = 0;
 	return NULL;
 }
 

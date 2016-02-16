@@ -115,8 +115,7 @@ static void ud_loopback(struct hfi1_qp *sqp, struct hfi1_swqe *swqe)
 			hfi1_bad_pqkey(ibp, OPA_TRAP_BAD_P_KEY, pkey,
 				       ah_attr->sl,
 				       sqp->ibqp.qp_num, qp->ibqp.qp_num,
-				       cpu_to_be16(slid),
-				       cpu_to_be16(ah_attr->dlid));
+				       slid, ah_attr->dlid);
 			goto drop;
 		}
 	}
@@ -139,8 +138,8 @@ static void ud_loopback(struct hfi1_qp *sqp, struct hfi1_swqe *swqe)
 			hfi1_bad_pqkey(ibp, OPA_TRAP_BAD_Q_KEY, qkey,
 				       ah_attr->sl,
 				       sqp->ibqp.qp_num, qp->ibqp.qp_num,
-				       cpu_to_be16(lid),
-				       cpu_to_be16(ah_attr->dlid));
+				       lid,
+				       ah_attr->dlid);
 			goto drop;
 		}
 	}
@@ -188,7 +187,7 @@ static void ud_loopback(struct hfi1_qp *sqp, struct hfi1_swqe *swqe)
 
 	if (ah_attr->ah_flags & IB_AH_GRH) {
 		hfi1_copy_sge(&qp->r_sge, &ah_attr->grh,
-			      sizeof(struct ib_grh), 1);
+			      sizeof(struct ib_grh), 1, 0);
 		wc.wc_flags |= IB_WC_GRH;
 	} else {
 		hfi1_skip_sge(&qp->r_sge, sizeof(struct ib_grh), 1);
@@ -205,7 +204,7 @@ static void ud_loopback(struct hfi1_qp *sqp, struct hfi1_swqe *swqe)
 		if (len > sge->sge_length)
 			len = sge->sge_length;
 		WARN_ON_ONCE(len == 0);
-		hfi1_copy_sge(&qp->r_sge, sge->vaddr, len, 1);
+		hfi1_copy_sge(&qp->r_sge, sge->vaddr, len, 1, 0);
 		sge->vaddr += len;
 		sge->length -= len;
 		sge->sge_length -= len;
@@ -450,6 +449,7 @@ bail:
 bail_no_tx:
 	ps->s_txreq = NULL;
 	qp->s_flags &= ~HFI1_S_BUSY;
+	qp->s_hdrwords = 0;
 	return 0;
 }
 
@@ -762,7 +762,8 @@ void hfi1_ud_rcv(struct hfi1_packet *packet)
 					       (be16_to_cpu(hdr->lrh[0]) >> 4) &
 						0xF,
 					       src_qp, qp->ibqp.qp_num,
-					       hdr->lrh[3], hdr->lrh[1]);
+					       be16_to_cpu(hdr->lrh[3]),
+					       be16_to_cpu(hdr->lrh[1]));
 				return;
 			}
 		} else {
@@ -775,7 +776,8 @@ void hfi1_ud_rcv(struct hfi1_packet *packet)
 			hfi1_bad_pqkey(ibp, OPA_TRAP_BAD_Q_KEY, qkey,
 				       (be16_to_cpu(hdr->lrh[0]) >> 4) & 0xF,
 				       src_qp, qp->ibqp.qp_num,
-				       hdr->lrh[3], hdr->lrh[1]);
+				       be16_to_cpu(hdr->lrh[3]),
+				       be16_to_cpu(hdr->lrh[1]));
 			return;
 		}
 		/* Drop invalid MAD packets (see 13.5.3.1). */
@@ -854,12 +856,13 @@ void hfi1_ud_rcv(struct hfi1_packet *packet)
 	}
 	if (has_grh) {
 		hfi1_copy_sge(&qp->r_sge, &hdr->u.l.grh,
-			      sizeof(struct ib_grh), 1);
+			      sizeof(struct ib_grh), 1, 0);
 		wc.wc_flags |= IB_WC_GRH;
 	} else {
 		hfi1_skip_sge(&qp->r_sge, sizeof(struct ib_grh), 1);
 	}
-	hfi1_copy_sge(&qp->r_sge, data, wc.byte_len - sizeof(struct ib_grh), 1);
+	hfi1_copy_sge(&qp->r_sge, data, wc.byte_len - sizeof(struct ib_grh),
+		      1, 0);
 	hfi1_put_ss(&qp->r_sge);
 	if (!test_and_clear_bit(HFI1_R_WRID_VALID, &qp->r_aflags))
 		return;

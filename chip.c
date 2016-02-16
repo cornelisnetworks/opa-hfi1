@@ -6708,11 +6708,17 @@ static void rxe_freeze(struct hfi1_devdata *dd)
  */
 static void rxe_kernel_unfreeze(struct hfi1_devdata *dd)
 {
+	u32 rcvmask;
 	int i;
 
 	/* enable all kernel contexts */
-	for (i = 0; i < dd->n_krcv_queues; i++)
-		hfi1_rcvctrl(dd, HFI1_RCVCTRL_CTXT_ENB, i);
+	for (i = 0; i < dd->n_krcv_queues; i++) {
+		rcvmask = HFI1_RCVCTRL_CTXT_ENB;
+		/* HFI1_RCVCTRL_TAILUPD_[ENB|DIS] needs to be set explicitly */
+		rcvmask |= HFI1_CAP_KGET_MASK(dd->rcd[i]->flags, DMA_RTAIL) ?
+			HFI1_RCVCTRL_TAILUPD_ENB : HFI1_RCVCTRL_TAILUPD_DIS;
+		hfi1_rcvctrl(dd, rcvmask, i);
+	}
 
 	/* enable port */
 	add_rcvctrl(dd, RCV_CTRL_RCV_PORT_ENABLE_SMASK);
@@ -8042,9 +8048,9 @@ static irqreturn_t sdma_interrupt(int irq, void *data)
 }
 
 /*
- * Clear the receive interrupt, forcing the write and making sure
- * we have data from the chip, pushing everything in front of it
- * back to the host.
+ * Clear the receive interrupt.  Use a read of the interrupt clear CSR
+ * to insure that the write completed.  This does NOT guarantee that
+ * queued DMA writes to memory from the chip are pushed.
  */
 static inline void clear_recv_intr(struct hfi1_ctxtdata *rcd)
 {
@@ -8063,15 +8069,33 @@ void force_recv_intr(struct hfi1_ctxtdata *rcd)
 	write_csr(rcd->dd, CCE_INT_FORCE + (8 * rcd->ireg), rcd->imask);
 }
 
-/* return non-zero if a packet is present */
+/*
+ * Return non-zero if a packet is present.
+ *
+ * This routine is called when rechecking for packets after the RcvAvail
+ * interrupt has been cleared down.  First, do a quick check of memory for
+ * a packet present.  If not found, use an expensive CSR read of the context
+ * tail to determine the actual tail.  The CSR read is necessary because there
+ * is no method to push pending DMAs to memory other than an interrupt and we
+ * are trying to determine if we need to force an interrupt.
+ */
 static inline int check_packet_present(struct hfi1_ctxtdata *rcd)
 {
-	if (!HFI1_CAP_IS_KSET(DMA_RTAIL))
-		return (rcd->seq_cnt ==
-				rhf_rcv_seq(rhf_to_cpu(get_rhf_addr(rcd))));
+	u32 tail;
+	int present;
 
-	/* else is RDMA rtail */
-	return (rcd->head != get_rcvhdrtail(rcd));
+	if (!HFI1_CAP_IS_KSET(DMA_RTAIL))
+		present = (rcd->seq_cnt ==
+				rhf_rcv_seq(rhf_to_cpu(get_rhf_addr(rcd))));
+	else /* is RDMA rtail */
+		present = (rcd->head != get_rcvhdrtail(rcd));
+
+	if (present)
+		return 1;
+
+	/* fall back to a CSR read, correct indpendent of DMA_RTAIL */
+	tail = (u32)read_uctxt_csr(rcd->dd, rcd->ctxt, RCV_HDR_TAIL);
+	return rcd->head != tail;
 }
 
 /*
@@ -11299,6 +11323,7 @@ void hfi1_rcvctrl(struct hfi1_devdata *dd, unsigned int op, int ctxt)
 		if (dd->rcvhdrtail_dummy_physaddr) {
 			write_kctxt_csr(dd, ctxt, RCV_HDR_TAIL_ADDR,
 					dd->rcvhdrtail_dummy_physaddr);
+			/* Enabling RcvCtxtCtrl.TailUpd is intentional. */
 			rcvctrl |= RCV_CTXT_CTRL_TAIL_UPD_SMASK;
 		}
 
@@ -11310,8 +11335,11 @@ void hfi1_rcvctrl(struct hfi1_devdata *dd, unsigned int op, int ctxt)
 		rcvctrl &= ~RCV_CTXT_CTRL_INTR_AVAIL_SMASK;
 	if (op & HFI1_RCVCTRL_TAILUPD_ENB && rcd->rcvhdrqtailaddr_phys)
 		rcvctrl |= RCV_CTXT_CTRL_TAIL_UPD_SMASK;
-	if (op & HFI1_RCVCTRL_TAILUPD_DIS)
-		rcvctrl &= ~RCV_CTXT_CTRL_TAIL_UPD_SMASK;
+	if (op & HFI1_RCVCTRL_TAILUPD_DIS) {
+		/* See comment on RcvCtxtCtrl.TailUpd above */
+		if (!(op & HFI1_RCVCTRL_CTXT_DIS))
+			rcvctrl &= ~RCV_CTXT_CTRL_TAIL_UPD_SMASK;
+	}
 	if (op & HFI1_RCVCTRL_TIDFLOW_ENB)
 		rcvctrl |= RCV_CTXT_CTRL_TID_FLOW_ENABLE_SMASK;
 	if (op & HFI1_RCVCTRL_TIDFLOW_DIS)

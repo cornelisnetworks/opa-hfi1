@@ -5,7 +5,7 @@
  *
  * GPL LICENSE SUMMARY
  *
- * Copyright(c) 2015 Intel Corporation.
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -18,7 +18,7 @@
  *
  * BSD LICENSE
  *
- * Copyright(c) 2015 Intel Corporation.
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -76,6 +76,7 @@
 #define HFI1_MIN_USER_CTXT_BUFCNT 7
 
 #define HFI1_MIN_HDRQ_EGRBUF_CNT 2
+#define HFI1_MAX_HDRQ_EGRBUF_CNT 16352
 #define HFI1_MIN_EAGER_BUFFER_SIZE (4 * 1024) /* 4KB */
 #define HFI1_MAX_EAGER_BUFFER_SIZE (256 * 1024) /* 256KB */
 
@@ -597,8 +598,8 @@ static void enable_chip(struct hfi1_devdata *dd)
 	 * Enable kernel ctxts' receive and receive interrupt.
 	 * Other ctxts done as user opens and initializes them.
 	 */
-	rcvmask = HFI1_RCVCTRL_CTXT_ENB | HFI1_RCVCTRL_INTRAVAIL_ENB;
 	for (i = 0; i < dd->first_user_ctxt; ++i) {
+		rcvmask = HFI1_RCVCTRL_CTXT_ENB | HFI1_RCVCTRL_INTRAVAIL_ENB;
 		rcvmask |= HFI1_CAP_KGET_MASK(dd->rcd[i]->flags, DMA_RTAIL) ?
 			HFI1_RCVCTRL_TAILUPD_ENB : HFI1_RCVCTRL_TAILUPD_DIS;
 		if (!HFI1_CAP_KGET_MASK(dd->rcd[i]->flags, MULTI_PKT_EGR))
@@ -912,6 +913,8 @@ static void shutdown_device(struct hfi1_devdata *dd)
 			sc_disable(dd->send_contexts[i].sc);
 		/* disable the send device */
 		pio_send_control(dd, PSC_GLOBAL_DISABLE);
+
+		shutdown_led_override(ppd);
 
 		/*
 		 * Clear SerdesEnable.
@@ -1361,6 +1364,13 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	/* Validate some global module parameters */
 	if (rcvhdrcnt <= HFI1_MIN_HDRQ_EGRBUF_CNT) {
 		hfi1_early_err(&pdev->dev, "Header queue  count too small\n");
+		ret = -EINVAL;
+		goto bail;
+	}
+	if (rcvhdrcnt > HFI1_MAX_HDRQ_EGRBUF_CNT) {
+		hfi1_early_err(&pdev->dev,
+			       "Receive header queue count cannot be greater than %u\n",
+			       HFI1_MAX_HDRQ_EGRBUF_CNT);
 		ret = -EINVAL;
 		goto bail;
 	}
