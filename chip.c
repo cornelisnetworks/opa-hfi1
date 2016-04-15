@@ -6188,18 +6188,13 @@ static void hreq_response(struct hfi1_devdata *dd, u8 return_code, u16 rsp_data)
 
 /*
  * Handle host requests from the 8051.
- *
- * This is a work-queue function outside of the interrupt.
  */
-void handle_8051_request(struct work_struct *work)
+static void handle_8051_request(struct hfi1_pportdata *ppd)
 {
-	struct hfi1_pportdata *ppd = container_of(work, struct hfi1_pportdata,
-							dc_host_req_work);
 	struct hfi1_devdata *dd = ppd->dd;
 	u64 reg;
 	u16 data = 0;
-	u8 type, i, lanes, *cache = ppd->qsfp_info.cache;
-	u8 cdr_ctrl_byte = cache[QSFP_CDR_CTRL_BYTE_OFFS];
+	u8 type;
 
 	reg = read_csr(dd, DC_DC8051_CFG_EXT_DEV_1);
 	if ((reg & DC_DC8051_CFG_EXT_DEV_1_REQ_NEW_SMASK) == 0)
@@ -6220,53 +6215,11 @@ void handle_8051_request(struct work_struct *work)
 	case HREQ_READ_CONFIG:
 	case HREQ_SET_TX_EQ_ABS:
 	case HREQ_SET_TX_EQ_REL:
+	case HREQ_ENABLE:
 		dd_dev_info(dd, "8051 request: request 0x%x not supported\n",
 			    type);
 		hreq_response(dd, HREQ_NOT_SUPPORTED, 0);
 		break;
-
-	case HREQ_ENABLE:
-		lanes = data & 0xF;
-		for (i = 0; lanes; lanes >>= 1, i++) {
-			if (!(lanes & 1)) {
-				continue;
-			} else {
-				if (data & 0x200) {
-					/* enable TX CDR */
-					if (cache[QSFP_MOD_PWR_OFFS] & 0x8 &&
-					    cache[QSFP_CDR_INFO_OFFS] & 0x80) {
-						cdr_ctrl_byte |= (1 << (i + 4));
-					}
-				} else {
-					/* disable TX CDR */
-					if (cache[QSFP_MOD_PWR_OFFS] & 0x8 &&
-					    cache[QSFP_CDR_INFO_OFFS] & 0x80) {
-						cdr_ctrl_byte &=
-								~(1 << (i + 4));
-					}
-				}
-
-				if (data & 0x800) {
-					/* enable RX CDR */
-					if (cache[QSFP_MOD_PWR_OFFS] & 0x4 &&
-					    cache[QSFP_CDR_INFO_OFFS] & 0x40) {
-						cdr_ctrl_byte |= (1 << i);
-					}
-				} else {
-					/* disable RX CDR */
-					if (cache[QSFP_MOD_PWR_OFFS] & 0x4 &&
-					    cache[QSFP_CDR_INFO_OFFS] & 0x40) {
-						cdr_ctrl_byte &= ~(1 << i);
-					}
-				}
-			}
-		}
-		qsfp_write(ppd, ppd->dd->hfi1_id, QSFP_CDR_CTRL_BYTE_OFFS,
-			   &cdr_ctrl_byte, 1);
-		hreq_response(dd, HREQ_SUCCESS, data);
-		refresh_qsfp_cache(ppd, &ppd->qsfp_info);
-		break;
-
 	case HREQ_CONFIG_DONE:
 		hreq_response(dd, HREQ_SUCCESS, 0);
 		break;
@@ -6274,7 +6227,6 @@ void handle_8051_request(struct work_struct *work)
 	case HREQ_INTERFACE_TEST:
 		hreq_response(dd, HREQ_SUCCESS, data);
 		break;
-
 	default:
 		dd_dev_err(dd, "8051 request: unknown request 0x%x\n", type);
 		hreq_response(dd, HREQ_NOT_SUPPORTED, 0);
@@ -7531,7 +7483,7 @@ static void handle_8051_interrupt(struct hfi1_devdata *dd, u32 unused, u64 reg)
 			host_msg &= ~(u64)LINKUP_ACHIEVED;
 		}
 		if (host_msg & EXT_DEVICE_CFG_REQ) {
-			queue_work(ppd->hfi1_wq, &ppd->dc_host_req_work);
+			handle_8051_request(ppd);
 			host_msg &= ~(u64)EXT_DEVICE_CFG_REQ;
 		}
 		if (host_msg & VERIFY_CAP_FRAME) {
@@ -13997,6 +13949,50 @@ static int obtain_boardname(struct hfi1_devdata *dd)
 	return 0;
 }
 
+/*
+ * Check the interrupt registers to make sure that they are mapped correctly.
+ * It is intended to help user identify any mismapping by VMM when the driver
+ * is running in a VM. This function should only be called before interrupt
+ * is set up properly.
+ *
+ * Return 0 on success, -EINVAL on failure.
+ */
+static int check_int_registers(struct hfi1_devdata *dd)
+{
+	u64 reg;
+	u64 all_bits = ~(u64)0;
+	u64 mask;
+
+	/* Clear CceIntMask[0] to avoid raising any interrupts */
+	mask = read_csr(dd, CCE_INT_MASK);
+	write_csr(dd, CCE_INT_MASK, 0ull);
+	reg = read_csr(dd, CCE_INT_MASK);
+	if (reg)
+		goto err_exit;
+
+	/* Clear all interrupt status bits */
+	write_csr(dd, CCE_INT_CLEAR, all_bits);
+	reg = read_csr(dd, CCE_INT_STATUS);
+	if (reg)
+		goto err_exit;
+
+	/* Set all interrupt status bits */
+	write_csr(dd, CCE_INT_FORCE, all_bits);
+	reg = read_csr(dd, CCE_INT_STATUS);
+	if (reg != all_bits)
+		goto err_exit;
+
+	/* Restore the interrupt mask */
+	write_csr(dd, CCE_INT_CLEAR, all_bits);
+	write_csr(dd, CCE_INT_MASK, mask);
+
+	return 0;
+err_exit:
+	write_csr(dd, CCE_INT_MASK, mask);
+	dd_dev_err(dd, "Interrupt registers not properly mapped by VMM\n");
+	return -EINVAL;
+}
+
 /**
  * Allocate and initialize the device structure for the hfi.
  * @dev: the pci_dev for hfi1_ib device
@@ -14021,6 +14017,7 @@ struct hfi1_devdata *hfi1_init_dd(struct pci_dev *pdev,
 		"RTL FPGA emulation",
 		"Functional simulator"
 	};
+	struct pci_dev *parent = pdev->bus->self;
 
 	dd = hfi1_alloc_devdata(pdev, NUM_IB_PORTS *
 				sizeof(struct hfi1_pportdata));
@@ -14097,6 +14094,17 @@ struct hfi1_devdata *hfi1_init_dd(struct pci_dev *pdev,
 			& CCE_REVISION_CHIP_REV_MAJOR_MASK;
 	dd->minrev = (dd->revision >> CCE_REVISION_CHIP_REV_MINOR_SHIFT)
 			& CCE_REVISION_CHIP_REV_MINOR_MASK;
+
+	/*
+	 * Check interrupt registers mapping if the driver has no access to
+	 * the upstream component. In this case, it is likely that the driver
+	 * is running in a VM.
+	 */
+	if (!parent) {
+		ret = check_int_registers(dd);
+		if (ret)
+			goto bail_cleanup;
+	}
 
 	/* obtain the hardware ID - NOT related to unit, which is a
 	 * software enumeration

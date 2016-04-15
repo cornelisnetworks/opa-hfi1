@@ -112,21 +112,11 @@ static int qual_power(struct hfi1_pportdata *ppd)
 		ppd->dd, PLATFORM_CONFIG_SYSTEM_TABLE, 0,
 		SYSTEM_TABLE_QSFP_POWER_CLASS_MAX, &power_class_max, 4);
 
-	if (QSFP_HIGH_PWR(cache[QSFP_MOD_PWR_OFFS]) != 4)
-		cable_power_class = QSFP_HIGH_PWR(cache[QSFP_MOD_PWR_OFFS]);
-	else
-		cable_power_class = QSFP_PWR(cache[QSFP_MOD_PWR_OFFS]);
+	cable_power_class = get_qsfp_power_class(cache[QSFP_MOD_PWR_OFFS]);
 
-	if (cable_power_class <= 3 && cable_power_class > (power_class_max - 1))
+	if (cable_power_class > power_class_max)
 		ppd->offline_disabled_reason =
 			HFI1_ODR_MASK(OPA_LINKDOWN_REASON_POWER_POLICY);
-	else if (cable_power_class > 4 && cable_power_class > (power_class_max))
-		ppd->offline_disabled_reason =
-			HFI1_ODR_MASK(OPA_LINKDOWN_REASON_POWER_POLICY);
-	/*
-	 * cable_power_class will never have value 4 as this simply
-	 * means the high power settings are unused
-	 */
 
 	if (ppd->offline_disabled_reason ==
 			HFI1_ODR_MASK(OPA_LINKDOWN_REASON_POWER_POLICY)) {
@@ -170,12 +160,9 @@ static int set_qsfp_high_power(struct hfi1_pportdata *ppd)
 	u8 cable_power_class = 0, power_ctrl_byte = 0;
 	u8 *cache = ppd->qsfp_info.cache;
 
-	if (QSFP_HIGH_PWR(cache[QSFP_MOD_PWR_OFFS]) != 4)
-		cable_power_class = QSFP_HIGH_PWR(cache[QSFP_MOD_PWR_OFFS]);
-	else
-		cable_power_class = QSFP_PWR(cache[QSFP_MOD_PWR_OFFS]);
+	cable_power_class = get_qsfp_power_class(cache[QSFP_MOD_PWR_OFFS]);
 
-	if (cable_power_class) {
+	if (cable_power_class > QSFP_POWER_CLASS_1) {
 		power_ctrl_byte = cache[QSFP_PWR_CTRL_BYTE_OFFS];
 
 		power_ctrl_byte |= 1;
@@ -184,8 +171,7 @@ static int set_qsfp_high_power(struct hfi1_pportdata *ppd)
 		qsfp_write(ppd, ppd->dd->hfi1_id, QSFP_PWR_CTRL_BYTE_OFFS,
 			   &power_ctrl_byte, 1);
 
-		if (cable_power_class > 3) {
-			/* > power class 4*/
+		if (cable_power_class > QSFP_POWER_CLASS_4) {
 			power_ctrl_byte |= (1 << 2);
 			qsfp_write(ppd, ppd->dd->hfi1_id,
 				   QSFP_PWR_CTRL_BYTE_OFFS,
@@ -205,9 +191,19 @@ static void apply_cdr_settings(
 	u8 *cache = ppd->qsfp_info.cache;
 	u8 cdr_ctrl_byte = cache[QSFP_CDR_CTRL_BYTE_OFFS];
 	u32 tx_preset = 0, rx_preset = 0;
+	int cable_power_class;
+
+	cable_power_class = get_qsfp_power_class(cache[QSFP_MOD_PWR_OFFS]);
 
 	if ((cache[QSFP_MOD_PWR_OFFS] & 0x4) &&
 	    (cache[QSFP_CDR_INFO_OFFS] & 0x40)) {
+		/* RX CDR present, bypass supported */
+		if (cable_power_class <= QSFP_POWER_CLASS_3) {
+			/* Power class <= 3, ignore config & turn RX CDR on */
+			cdr_ctrl_byte |= 0xF;
+			goto tx_cdr_control;
+		}
+
 		get_platform_config_field(
 			ppd->dd, PLATFORM_CONFIG_RX_PRESET_TABLE,
 			rx_preset_index, RX_PRESET_TABLE_QSFP_RX_CDR_APPLY,
@@ -239,8 +235,16 @@ static void apply_cdr_settings(
 				__func__);
 	}
 
+tx_cdr_control:
 	if ((cache[QSFP_MOD_PWR_OFFS] & 0x8) &&
 	    (cache[QSFP_CDR_INFO_OFFS] & 0x80)) {
+		/* TX CDR present, bypass supported */
+		if (cable_power_class <= QSFP_POWER_CLASS_3) {
+			/* Power class <= 3, ignore config & turn TX CDR on */
+			cdr_ctrl_byte |= 0xF0;
+			goto write_cdr_control;
+		}
+
 		get_platform_config_field(
 			ppd->dd,
 			PLATFORM_CONFIG_TX_PRESET_TABLE, tx_preset_index,
@@ -269,6 +273,7 @@ static void apply_cdr_settings(
 				__func__);
 	}
 
+write_cdr_control:
 	qsfp_write(ppd, ppd->dd->hfi1_id, QSFP_CDR_CTRL_BYTE_OFFS,
 		   &cdr_ctrl_byte, 1);
 }

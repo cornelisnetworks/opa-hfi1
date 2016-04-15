@@ -504,7 +504,6 @@ void hfi1_init_pportdata(struct pci_dev *pdev, struct hfi1_pportdata *ppd,
 	INIT_WORK(&ppd->link_vc_work, handle_verify_cap);
 	INIT_WORK(&ppd->link_up_work, handle_link_up);
 	INIT_WORK(&ppd->link_down_work, handle_link_down);
-	INIT_WORK(&ppd->dc_host_req_work, handle_8051_request);
 	INIT_WORK(&ppd->freeze_work, handle_freeze);
 	INIT_WORK(&ppd->link_downgrade_work, handle_link_downgrade);
 	INIT_WORK(&ppd->sma_message_work, handle_sma_message);
@@ -1229,6 +1228,9 @@ static int __init hfi1_mod_init(void)
 	idr_init(&hfi1_unit_table);
 
 	hfi1_dbg_init();
+	ret = hfi1_wss_init();
+	if (ret < 0)
+		goto bail_wss;
 	ret = pci_register_driver(&hfi1_pci_driver);
 	if (ret < 0) {
 		pr_err("Unable to register driver: error %d\n", -ret);
@@ -1237,6 +1239,8 @@ static int __init hfi1_mod_init(void)
 	goto bail; /* all OK */
 
 bail_dev:
+	hfi1_wss_exit();
+bail_wss:
 	hfi1_dbg_exit();
 	idr_destroy(&hfi1_unit_table);
 	dev_cleanup();
@@ -1252,6 +1256,7 @@ module_init(hfi1_mod_init);
 static void __exit hfi1_mod_cleanup(void)
 {
 	pci_unregister_driver(&hfi1_pci_driver);
+	hfi1_wss_exit();
 	hfi1_dbg_exit();
 	hfi1_cpulist_count = 0;
 	kfree(hfi1_cpulist);

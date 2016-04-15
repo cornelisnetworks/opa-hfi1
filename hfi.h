@@ -65,8 +65,6 @@
 #include <linux/cdev.h>
 #include <linux/delay.h>
 #include <linux/kthread.h>
-#include <linux/mmu_notifier.h>
-#include <linux/rbtree.h>
 
 #include "chip_registers.h"
 #include "common.h"
@@ -610,7 +608,6 @@ struct hfi1_pportdata {
 	struct work_struct link_vc_work;
 	struct work_struct link_up_work;
 	struct work_struct link_down_work;
-	struct work_struct dc_host_req_work;
 	struct work_struct sma_message_work;
 	struct work_struct freeze_work;
 	struct work_struct link_downgrade_work;
@@ -1173,6 +1170,7 @@ struct hfi1_devdata {
 #define PT_EAGER    1
 #define PT_INVALID  2
 
+struct tid_rb_node;
 struct mmu_rb_node;
 
 /* Private data for file operations */
@@ -1183,21 +1181,15 @@ struct hfi1_filedata {
 	struct hfi1_user_sdma_pkt_q *pq;
 	/* for cpu affinity; -1 if none */
 	int rec_cpu_num;
-	struct mmu_notifier mn;
+	u32 tid_n_pinned;
 	struct rb_root tid_rb_root;
-	struct mmu_rb_node **entry_to_rb;
+	struct tid_rb_node **entry_to_rb;
 	u32 tid_limit;
 	u32 tid_used;
-	/* protect rb tree */
-	spinlock_t rb_lock;
 	u32 *invalid_tids;
 	u32 invalid_tid_idx;
-	/* protect invalid tid info */
+	/* protect invalid_tids array and invalid_tid_idx */
 	spinlock_t invalid_lock;
-	int (*mmu_rb_insert)(struct hfi1_filedata *, struct rb_root *,
-			     struct mmu_rb_node *);
-	void (*mmu_rb_remove)(struct hfi1_filedata *, struct rb_root *,
-			      struct mmu_rb_node *);
 };
 
 extern struct list_head hfi1_dev_list;
@@ -1663,8 +1655,9 @@ void shutdown_led_override(struct hfi1_pportdata *ppd);
  */
 #define DEFAULT_RCVHDR_ENTSIZE 32
 
+bool hfi1_can_pin_pages(struct hfi1_devdata *, u32, u32);
 int hfi1_acquire_user_pages(unsigned long, size_t, bool, struct page **);
-void hfi1_release_user_pages(struct page **, size_t, bool);
+void hfi1_release_user_pages(struct mm_struct *, struct page **, size_t, bool);
 
 static inline void clear_rcvhdrtail(const struct hfi1_ctxtdata *rcd)
 {

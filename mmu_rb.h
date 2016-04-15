@@ -5,7 +5,7 @@
  *
  * GPL LICENSE SUMMARY
  *
- * Copyright(c) 2015, 2016 Intel Corporation.
+ * Copyright(c) 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -18,7 +18,7 @@
  *
  * BSD LICENSE
  *
- * Copyright(c) 2015, 2016 Intel Corporation.
+ * Copyright(c) 2016 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -47,41 +47,33 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-#include <linux/device.h>
-#include <linux/wait.h>
+#ifndef _HFI1_MMU_RB_H
+#define _HFI1_MMU_RB_H
 
-#include "common.h"
-#include "iowait.h"
-#include "user_exp_rcv.h"
+#include "hfi.h"
 
-extern uint extended_psn;
-
-struct hfi1_user_sdma_pkt_q {
-	struct list_head list;
-	unsigned ctxt;
-	unsigned subctxt;
-	u16 n_max_reqs;
-	atomic_t n_reqs;
-	u16 reqidx;
-	struct hfi1_devdata *dd;
-	struct kmem_cache *txreq_cache;
-	struct user_sdma_request *reqs;
-	struct iowait busy;
-	unsigned state;
-	wait_queue_head_t wait;
-	unsigned long unpinned;
-	struct rb_root sdma_rb_root;
-	u32 n_locked;
-	struct list_head evict;
-	spinlock_t evict_lock; /* protect evict and n_locked */
+struct mmu_rb_node {
+	unsigned long addr;
+	unsigned long len;
+	unsigned long __last;
+	struct rb_node node;
 };
 
-struct hfi1_user_sdma_comp_q {
-	u16 nentries;
-	struct hfi1_sdma_comp_entry *comps;
+struct mmu_rb_ops {
+	bool (*filter)(struct mmu_rb_node *, unsigned long, unsigned long);
+	int (*insert)(struct rb_root *, struct mmu_rb_node *);
+	void (*remove)(struct rb_root *, struct mmu_rb_node *,
+		       struct mm_struct *);
+	int (*invalidate)(struct rb_root *, struct mmu_rb_node *);
 };
 
-int hfi1_user_sdma_alloc_queues(struct hfi1_ctxtdata *, struct file *);
-int hfi1_user_sdma_free_queues(struct hfi1_filedata *);
-int hfi1_user_sdma_process_request(struct file *, struct iovec *, unsigned long,
-				   unsigned long *);
+int hfi1_mmu_rb_register(struct rb_root *root, struct mmu_rb_ops *ops);
+void hfi1_mmu_rb_unregister(struct rb_root *);
+int hfi1_mmu_rb_insert(struct rb_root *, struct mmu_rb_node *);
+void hfi1_mmu_rb_remove(struct rb_root *, struct mmu_rb_node *);
+struct mmu_rb_node *hfi1_mmu_rb_search(struct rb_root *, unsigned long,
+				       unsigned long);
+struct mmu_rb_node *hfi1_mmu_rb_extract(struct rb_root *, unsigned long,
+					unsigned long);
+
+#endif /* _HFI1_MMU_RB_H */

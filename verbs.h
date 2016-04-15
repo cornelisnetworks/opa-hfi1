@@ -624,8 +624,9 @@ struct hfi1_pkt_state {
 /*
  * Wait flags that would prevent any packet type from being sent.
  */
-#define HFI1_S_ANY_WAIT_IO (HFI1_S_WAIT_PIO | HFI1_S_WAIT_TX | \
-	HFI1_S_WAIT_DMA_DESC | HFI1_S_WAIT_KMEM)
+#define HFI1_S_ANY_WAIT_IO \
+	(HFI1_S_WAIT_PIO | HFI1_S_WAIT_PIO_DRAIN | HFI1_S_WAIT_TX | \
+	 HFI1_S_WAIT_DMA_DESC | HFI1_S_WAIT_KMEM)
 
 /*
  * Wait flags that would prevent send work requests from making progress.
@@ -1142,6 +1143,28 @@ int hfi1_verbs_send_pio(struct hfi1_qp *qp, struct hfi1_pkt_state *ps,
 			u64 pbc);
 
 struct send_context *qp_to_send_context(struct hfi1_qp *qp, u8 sc5);
+
+int hfi1_wss_init(void);
+void hfi1_wss_exit(void);
+
+/* platform specific: return the lowest level cache (llc) size, in KiB */
+static inline int wss_llc_size(void)
+{
+	/* assume that the boot CPU value is universal for all CPUs */
+	return boot_cpu_data.x86_cache_size;
+}
+
+/* platform specific: cacheless copy */
+static inline void cacheless_memcpy(void *dst, void *src, size_t n)
+{
+	/*
+	 * Use the only available X64 cacheless copy.  Add a __user cast
+	 * to quiet sparse.  The src agument is already in the kernel so
+	 * there are no security issues.  The extra fault recovery machinery
+	 * is not invoked.
+	 */
+	__copy_user_nocache(dst, (void __user *)src, n, 0);
+}
 
 extern const enum ib_wc_opcode ib_hfi1_wc_opcode[];
 
