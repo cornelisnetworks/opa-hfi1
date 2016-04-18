@@ -135,8 +135,8 @@ void hfi1_mmu_rb_unregister(struct rb_root *root)
 
 	spin_lock(&mmu_rb_lock);
 	list_del_rcu(&handler->list);
-	synchronize_rcu();
 	spin_unlock(&mmu_rb_lock);
+	synchronize_rcu();
 
 	spin_lock_irqsave(&handler->lock, flags);
 	if (!RB_EMPTY_ROOT(root)) {
