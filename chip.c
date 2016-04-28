@@ -9348,8 +9348,14 @@ int bringup_serdes(struct hfi1_pportdata *ppd)
 			return ret;
 	}
 
+	get_port_type(ppd);
+	if (ppd->port_type == PORT_TYPE_QSFP) {
+		set_qsfp_int_n(ppd, 0);
+		wait_for_qsfp_init(ppd);
+		set_qsfp_int_n(ppd, 1);
+	}
 	/*
-	 * tune the SERDES to a ballpark setting for
+	 * Tune the SerDes to a ballpark setting for
 	 * optimal signal and bit error rate
 	 * Needs to be done before starting the link
 	 */

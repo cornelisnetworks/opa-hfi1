@@ -89,6 +89,17 @@ void free_platform_config(struct hfi1_devdata *dd)
 	 */
 }
 
+void get_port_type(struct hfi1_pportdata *ppd)
+{
+	int ret;
+
+	ret = get_platform_config_field(ppd->dd, PLATFORM_CONFIG_PORT_TABLE, 0,
+					PORT_TABLE_PORT_TYPE, &ppd->port_type,
+					4);
+	if (ret)
+		ppd->port_type = PORT_TYPE_UNKNOWN;
+}
+
 int set_qsfp_tx(struct hfi1_pportdata *ppd, int on)
 {
 	u8 tx_ctrl_byte = on ? 0x0 : 0xF;
@@ -756,12 +767,6 @@ int tune_serdes(struct hfi1_pportdata *ppd)
 		ppd->driver_link_ready = 1;
 		return 0;
 	}
-
-	ret = get_platform_config_field(ppd->dd, PLATFORM_CONFIG_PORT_TABLE, 0,
-					PORT_TABLE_PORT_TYPE, &ppd->port_type,
-					4);
-	if (ret)
-		ppd->port_type = PORT_TYPE_UNKNOWN;
 
 	switch (ppd->port_type) {
 	case PORT_TYPE_DISCONNECTED:
