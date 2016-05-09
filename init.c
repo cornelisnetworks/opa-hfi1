@@ -737,12 +737,14 @@ int hfi1_init(struct hfi1_devdata *dd, int reinit)
 		lastfail = hfi1_create_rcvhdrq(dd, rcd);
 		if (!lastfail)
 			lastfail = hfi1_setup_eagerbufs(rcd);
-		if (lastfail)
+		if (lastfail) {
 			dd_dev_err(dd,
 				   "failed to allocate kernel ctxt's rcvhdrq and/or egr bufs\n");
+			ret = lastfail;
+		}
 	}
-	if (lastfail)
-		ret = lastfail;
+	if (ret)
+		goto done;
 
 	/* Allocate enough memory for user event notification. */
 	len = ALIGN(dd->chip_rcv_contexts * HFI1_MAX_SHARED_CTXTS *
