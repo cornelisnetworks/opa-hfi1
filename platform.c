@@ -468,7 +468,8 @@ static int apply_tunings(
 	/* Enable external device config if channel is limiting active */
 	ret = read_8051_config(ppd->dd, LINK_OPTIMIZATION_SETTINGS,
 			       GENERAL_CONFIG, &config_data);
-	config_data |= limiting_active;
+	config_data &= ~(0xff << ENABLE_EXT_DEV_CONFIG_SHIFT);
+	config_data |= ((u32)limiting_active << ENABLE_EXT_DEV_CONFIG_SHIFT);
 	ret = load_8051_config(ppd->dd, LINK_OPTIMIZATION_SETTINGS,
 			       GENERAL_CONFIG, config_data);
 	if (ret != HCMD_SUCCESS)
@@ -480,7 +481,8 @@ static int apply_tunings(
 	/* Pass tuning method to 8051 */
 	ret = read_8051_config(ppd->dd, LINK_TUNING_PARAMETERS, GENERAL_CONFIG,
 			       &config_data);
-	config_data |= tuning_method;
+	config_data &= ~(0xff << TUNING_METHOD_SHIFT);
+	config_data |= ((u32)tuning_method << TUNING_METHOD_SHIFT);
 	ret = load_8051_config(ppd->dd, LINK_TUNING_PARAMETERS, GENERAL_CONFIG,
 			       config_data);
 	if (ret != HCMD_SUCCESS)
