@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -530,8 +527,8 @@ static int apply_tunings(
 		ret = read_8051_config(ppd->dd, DC_HOST_COMM_SETTINGS,
 				       GENERAL_CONFIG, &config_data);
 		/* Clear, then set the external device config field */
-		config_data &= ~(0xFF << 24);
-		config_data |= (external_device_config << 24);
+		config_data &= ~(u32)0xFF;
+		config_data |= external_device_config;
 		ret = load_8051_config(ppd->dd, DC_HOST_COMM_SETTINGS,
 				       GENERAL_CONFIG, config_data);
 		if (ret != HCMD_SUCCESS)
@@ -601,10 +598,11 @@ bail:
 	return ret;
 }
 
+/* Must be holding the QSFP i2c resource */
 static int tune_active_qsfp(struct hfi1_pportdata *ppd, u32 *ptr_tx_preset,
 			    u32 *ptr_rx_preset, u32 *ptr_total_atten)
 {
-	int ret = 0;
+	int ret;
 	u16 lss = ppd->link_speed_supported, lse = ppd->link_speed_enabled;
 	u8 *cache = ppd->qsfp_info.cache;
 
@@ -805,12 +803,22 @@ int tune_serdes(struct hfi1_pportdata *ppd)
 			total_atten = platform_atten + remote_atten;
 
 			tuning_method = 0;
-		} else
+		} else {
 			ppd->offline_disabled_reason =
 			     HFI1_ODR_MASK(OPA_LINKDOWN_REASON_CHASSIS_CONFIG);
+			goto bail;
+		}
 		break;
 	case PORT_TYPE_QSFP:
 		if (qsfp_mod_present(ppd)) {
+			ret = acquire_chip_resource(ppd->dd,
+						    qsfp_resource(ppd->dd),
+						    QSFP_WAIT);
+			if (ret) {
+				dd_dev_err(ppd->dd, "%s: hfi%d: cannot lock i2c chain\n",
+					   __func__, (int)ppd->dd->hfi1_id);
+				goto bail;
+			}
 			refresh_qsfp_cache(ppd, &ppd->qsfp_info);
 
 			if (ppd->qsfp_info.cache_valid) {
@@ -827,18 +835,21 @@ int tune_serdes(struct hfi1_pportdata *ppd)
 				 * update the cache to reflect the changes
 				 */
 				refresh_qsfp_cache(ppd, &ppd->qsfp_info);
-				if (ret)
-					goto bail;
 			} else {
 				dd_dev_info(dd,
 					    "%s: Reading QSFP memory failed\n",
 						__func__);
-				goto bail;
+				ret = -EINVAL; /* a fail indication */
 			}
-		} else
+			release_chip_resource(ppd->dd, qsfp_resource(ppd->dd));
+			if (ret)
+				goto bail;
+		} else {
 			ppd->offline_disabled_reason =
 			   HFI1_ODR_MASK(
 				OPA_LINKDOWN_REASONLOCAL_MEDIA_NOT_INSTALLED);
+			goto bail;
+		}
 		break;
 	default:
 		dd_dev_info(ppd->dd, "%s: Unknown port type\n", __func__);

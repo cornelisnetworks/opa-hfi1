@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -823,7 +820,6 @@ void hfi1_do_send(struct work_struct *work)
 	struct hfi1_qp *qp = container_of(wait, struct hfi1_qp, s_iowait);
 	struct hfi1_pkt_state ps;
 	int (*make_req)(struct hfi1_qp *qp, struct hfi1_pkt_state *ps);
-	unsigned long flags;
 	unsigned long timeout;
 	unsigned long timeout_int;
 	int cpu;
@@ -858,11 +854,11 @@ void hfi1_do_send(struct work_struct *work)
 		timeout_int = SEND_RESCHED_TIMEOUT;
 	}
 
-	spin_lock_irqsave(&qp->s_lock, flags);
+	spin_lock_irqsave(&qp->s_lock, ps.flags);
 
 	/* Return if we are already busy processing a work request. */
 	if (!hfi1_send_ok(qp)) {
-		spin_unlock_irqrestore(&qp->s_lock, flags);
+		spin_unlock_irqrestore(&qp->s_lock, ps.flags);
 		return;
 	}
 
@@ -876,7 +872,7 @@ void hfi1_do_send(struct work_struct *work)
 	do {
 		/* Check for a constructed packet to be sent. */
 		if (qp->s_hdrwords != 0) {
-			spin_unlock_irqrestore(&qp->s_lock, flags);
+			spin_unlock_irqrestore(&qp->s_lock, ps.flags);
 			/*
 			 * If the packet cannot be sent now, return and
 			 * the send tasklet will be woken up later.
@@ -888,25 +884,29 @@ void hfi1_do_send(struct work_struct *work)
 			/* allow other tasks to run */
 			if (unlikely(time_after(jiffies, timeout))) {
 				if (workqueue_congested(cpu, ps.ppd->hfi1_wq)) {
-					spin_lock_irqsave(&qp->s_lock, flags);
+					spin_lock_irqsave(&qp->s_lock,
+							  ps.flags);
 					qp->s_flags &= ~HFI1_S_BUSY;
 					hfi1_schedule_send(qp);
 					spin_unlock_irqrestore(&qp->s_lock,
-							       flags);
+							       ps.flags);
 					this_cpu_inc(*ps.ppd->dd->send_schedule
 						     );
 					return;
 				}
-				cond_resched();
-				this_cpu_inc(*ps.ppd->dd->send_schedule);
+				if (!irqs_disabled()) {
+					cond_resched();
+					this_cpu_inc(
+					   *ps.ppd->dd->send_schedule);
+				}
 				timeout = jiffies + (timeout_int) / 8;
 			}
-			spin_lock_irqsave(&qp->s_lock, flags);
+			spin_lock_irqsave(&qp->s_lock, ps.flags);
 		}
 
 	} while (make_req(qp, &ps));
 
-	spin_unlock_irqrestore(&qp->s_lock, flags);
+	spin_unlock_irqrestore(&qp->s_lock, ps.flags);
 }
 
 /*

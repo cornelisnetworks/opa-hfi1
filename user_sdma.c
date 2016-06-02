@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -620,6 +617,13 @@ int hfi1_user_sdma_process_request(struct file *fp, struct iovec *iovec,
 	if (vl >= dd->pport->vls_operational ||
 	    vl != sc_to_vlt(dd, sc)) {
 		SDMA_DBG(req, "Invalid SC(%u)/VL(%u)", sc, vl);
+		ret = -EINVAL;
+		goto free_req;
+	}
+
+	/* Checking P_KEY for requests from user-space */
+	if (egress_pkey_check(dd->pport, req->hdr.lrh, req->hdr.bth, sc,
+			      PKEY_CHECK_INVALID)) {
 		ret = -EINVAL;
 		goto free_req;
 	}

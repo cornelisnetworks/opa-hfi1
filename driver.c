@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -77,7 +74,8 @@ DEFINE_MUTEX(hfi1_mutex);	/* general driver use */
 
 unsigned int hfi1_max_mtu = HFI1_DEFAULT_MAX_MTU;
 module_param_named(max_mtu, hfi1_max_mtu, uint, S_IRUGO);
-MODULE_PARM_DESC(max_mtu, "Set max MTU bytes, default is 8192");
+MODULE_PARM_DESC(max_mtu, "Set max MTU bytes, default is " __stringify(
+		 HFI1_DEFAULT_MAX_MTU));
 
 unsigned int hfi1_cu = 1;
 module_param_named(cu, hfi1_cu, uint, S_IRUGO);
@@ -1157,7 +1155,7 @@ int hfi1_set_lid(struct hfi1_pportdata *ppd, u32 lid, u8 lmc)
 	ppd->lmc = lmc;
 	hfi1_set_ib_cfg(ppd, HFI1_IB_CFG_LIDLMC, 0);
 
-	dd_dev_info(dd, "IB%u:%u got a lid: 0x%x\n", dd->unit, ppd->port, lid);
+	dd_dev_info(dd, "port %u: got a lid: 0x%x\n", ppd->port, lid);
 
 	return 0;
 }
@@ -1166,13 +1164,21 @@ void shutdown_led_override(struct hfi1_pportdata *ppd)
 {
 	struct hfi1_devdata *dd = ppd->dd;
 
+	/*
+	 * This pairs with the memory barrier in hfi1_start_led_override to
+	 * ensure that we read the correct state of LED beaconing represented
+	 * by led_override_timer_active
+	 */
+	smp_rmb();
 	if (atomic_read(&ppd->led_override_timer_active)) {
 		del_timer_sync(&ppd->led_override_timer);
 		atomic_set(&ppd->led_override_timer_active, 0);
+		/* Ensure the atomic_set is visible to all CPUs */
+		smp_wmb();
 	}
 
-	/* Shut off LEDs after we are sure timer is not running */
-	setextled(dd, 0);
+	/* Hand control of the LED to the DC for normal operation */
+	write_csr(dd, DCC_CFG_LED_CNTRL, 0);
 }
 
 static void run_led_override(unsigned long opaque)
@@ -1186,56 +1192,48 @@ static void run_led_override(unsigned long opaque)
 		return;
 
 	phase_idx = ppd->led_override_phase & 1;
+
 	setextled(dd, phase_idx);
 
 	timeout = ppd->led_override_vals[phase_idx];
+
 	/* Set up for next phase */
 	ppd->led_override_phase = !ppd->led_override_phase;
 
-	/*
-	 * don't re-fire the timer if user asked for it to be off; we let
-	 * it fire one more time after they turn it off to simplify
-	 */
-	if (ppd->led_override_vals[0] || ppd->led_override_vals[1])
-		mod_timer(&ppd->led_override_timer, jiffies + timeout);
-	else
-		/* Hand control of the LED to the DC for normal operation */
-		write_csr(dd, DCC_CFG_LED_CNTRL, 0);
+	mod_timer(&ppd->led_override_timer, jiffies + timeout);
 }
 
 /*
  * To have the LED blink in a particular pattern, provide timeon and timeoff
- * in milliseconds. To turn off custom blinking and return to normal operation,
- * provide timeon = timeoff = 0.
+ * in milliseconds.
+ * To turn off custom blinking and return to normal operation, use
+ * shutdown_led_override()
  */
-void hfi1_set_led_override(struct hfi1_pportdata *ppd, unsigned int timeon,
-			   unsigned int timeoff)
+void hfi1_start_led_override(struct hfi1_pportdata *ppd, unsigned int timeon,
+			     unsigned int timeoff)
 {
-	struct hfi1_devdata *dd = ppd->dd;
-
-	if (!(dd->flags & HFI1_INITTED))
+	if (!(ppd->dd->flags & HFI1_INITTED))
 		return;
 
 	/* Convert to jiffies for direct use in timer */
 	ppd->led_override_vals[0] = msecs_to_jiffies(timeoff);
 	ppd->led_override_vals[1] = msecs_to_jiffies(timeon);
-	ppd->led_override_phase = 1; /* Arbitrarily start from LED on phase */
+
+	/* Arbitrarily start from LED on phase */
+	ppd->led_override_phase = 1;
 
 	/*
 	 * If the timer has not already been started, do so. Use a "quick"
-	 * timeout so the function will be called soon, to look at our request.
+	 * timeout so the handler will be called soon to look at our request.
 	 */
-	if (atomic_inc_return(&ppd->led_override_timer_active) == 1) {
-		/* Need to start timer */
-		init_timer(&ppd->led_override_timer);
-		ppd->led_override_timer.function = run_led_override;
-		ppd->led_override_timer.data = (unsigned long)ppd;
+	if (!timer_pending(&ppd->led_override_timer)) {
+		setup_timer(&ppd->led_override_timer, run_led_override,
+			    (unsigned long)ppd);
 		ppd->led_override_timer.expires = jiffies + 1;
 		add_timer(&ppd->led_override_timer);
-	} else {
-		if (ppd->led_override_vals[0] || ppd->led_override_vals[1])
-			mod_timer(&ppd->led_override_timer, jiffies + 1);
-		atomic_dec(&ppd->led_override_timer_active);
+		atomic_set(&ppd->led_override_timer_active, 1);
+		/* Ensure the atomic_set is visible to all CPUs */
+		smp_wmb();
 	}
 }
 

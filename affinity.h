@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -80,13 +77,30 @@ enum ctxt_mem_type {
 };
 
 extern uint mem_affinity;
+struct cpu_mask_set {
+	struct cpumask mask;
+	struct cpumask used;
+	uint gen;
+};
+
+struct hfi1_affinity {
+	struct cpu_mask_set def_intr;
+	struct cpu_mask_set rcv_intr;
+	struct cpu_mask_set proc;
+	struct cpumask real_cpu_mask;
+	/* spin lock to protect affinity struct */
+	spinlock_t lock;
+};
+
 #define MEM_AFF_DEV_NUMA(type) (!!(mem_affinity & (1 << MEM_##type)))
 #define MEM_AFF_PROC_NUMA(type) (!!(mem_affinity & (1 << MEM_##type)))
 
 struct hfi1_msix_entry;
 
+/* Initialize non-HT cpu cores mask */
+int init_real_cpu_mask(struct hfi1_devdata *);
 /* Initialize driver affinity data */
-int hfi1_dev_affinity_init(struct hfi1_devdata *);
+void hfi1_dev_affinity_init(struct hfi1_devdata *);
 /* Free driver affinity data */
 void hfi1_dev_affinity_free(struct hfi1_devdata *);
 /*

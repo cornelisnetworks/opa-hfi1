@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -514,6 +511,7 @@ static int __subn_get_opa_portinfo(struct opa_smp *smp, u32 am, u8 *data,
 	struct opa_port_info *pi = (struct opa_port_info *)data;
 	u8 mtu;
 	u8 credit_rate;
+	u8 is_beaconing_active;
 	u32 state;
 	u32 num_ports = OPA_AM_NPORT(am);
 	u32 start_of_sm_config = OPA_AM_START_SM_CFG(am);
@@ -579,6 +577,14 @@ static int __subn_get_opa_portinfo(struct opa_smp *smp, u32 am, u8 *data,
 	pi->port_states.ledenable_offlinereason = ppd->neighbor_normal << 4;
 	pi->port_states.ledenable_offlinereason |=
 		ppd->is_sm_config_started << 5;
+	/*
+	 * This pairs with the memory barrier in hfi1_start_led_override to
+	 * ensure that we read the correct state of LED beaconing represented
+	 * by led_override_timer_active
+	 */
+	smp_rmb();
+	is_beaconing_active = !!atomic_read(&ppd->led_override_timer_active);
+	pi->port_states.ledenable_offlinereason |= is_beaconing_active << 6;
 	pi->port_states.ledenable_offlinereason |=
 		ppd->offline_disabled_reason;
 #else
@@ -996,7 +1002,21 @@ static int set_port_states(struct hfi1_pportdata *ppd, struct opa_smp *smp,
 			}
 		}
 
-		set_link_state(ppd, link_state);
+		if ((link_state == HLS_DN_POLL ||
+		     link_state == HLS_DN_DOWNDEF)) {
+			/*
+			 * Going to poll.  No matter what the current state,
+			 * always move offline first, then tune and start the
+			 * link.  This correctly handles a FM link bounce and
+			 * a link enable.  Going offline is a no-op if already
+			 * offline.
+			 */
+			set_link_state(ppd, HLS_DN_OFFLINE);
+			tune_serdes(ppd);
+			start_link(ppd);
+		} else {
+			set_link_state(ppd, link_state);
+		}
 		if (link_state == HLS_DN_DISABLE &&
 		    (ppd->offline_disabled_reason >
 		     HFI1_ODR_MASK(OPA_LINKDOWN_REASON_SMA_DISABLED) ||
@@ -3220,6 +3240,50 @@ static int __subn_get_opa_cong_setting(struct opa_smp *smp, u32 am,
 	return reply((struct ib_mad_hdr *)smp);
 }
 
+/*
+ * Apply congestion control information stored in the ppd to the
+ * active structure.
+ */
+static void apply_cc_state(struct hfi1_pportdata *ppd)
+{
+	struct cc_state *old_cc_state, *new_cc_state;
+
+	new_cc_state = kzalloc(sizeof(*new_cc_state), GFP_KERNEL);
+	if (!new_cc_state)
+		return;
+
+	/*
+	 * Hold the lock for updating *and* to prevent ppd information
+	 * from changing during the update.
+	 */
+	spin_lock(&ppd->cc_state_lock);
+
+	old_cc_state = get_cc_state(ppd);
+	if (!old_cc_state) {
+		/* never active, or shutting down */
+		spin_unlock(&ppd->cc_state_lock);
+		kfree(new_cc_state);
+		return;
+	}
+
+	*new_cc_state = *old_cc_state;
+
+	new_cc_state->cct.ccti_limit = ppd->total_cct_entry - 1;
+	memcpy(new_cc_state->cct.entries, ppd->ccti_entries,
+	       ppd->total_cct_entry * sizeof(struct ib_cc_table_entry));
+
+	new_cc_state->cong_setting.port_control = IB_CC_CCS_PC_SL_BASED;
+	new_cc_state->cong_setting.control_map = ppd->cc_sl_control_map;
+	memcpy(new_cc_state->cong_setting.entries, ppd->congestion_entries,
+	       OPA_MAX_SLS * sizeof(struct opa_congestion_setting_entry));
+
+	rcu_assign_pointer(ppd->cc_state, new_cc_state);
+
+	spin_unlock(&ppd->cc_state_lock);
+
+	call_rcu(&old_cc_state->rcu, cc_state_reclaim);
+}
+
 static int __subn_set_opa_cong_setting(struct opa_smp *smp, u32 am, u8 *data,
 				       struct ib_device *ibdev, u8 port,
 				       u32 *resp_len)
@@ -3231,6 +3295,11 @@ static int __subn_set_opa_cong_setting(struct opa_smp *smp, u32 am, u8 *data,
 	struct opa_congestion_setting_entry_shadow *entries;
 	int i;
 
+	/*
+	 * Save details from packet into the ppd.  Hold the cc_state_lock so
+	 * our information is consistent with anyone trying to apply the state.
+	 */
+	spin_lock(&ppd->cc_state_lock);
 	ppd->cc_sl_control_map = be32_to_cpu(p->control_map);
 
 	entries = ppd->congestion_entries;
@@ -3241,6 +3310,10 @@ static int __subn_set_opa_cong_setting(struct opa_smp *smp, u32 am, u8 *data,
 			p->entries[i].trigger_threshold;
 		entries[i].ccti_min = p->entries[i].ccti_min;
 	}
+	spin_unlock(&ppd->cc_state_lock);
+
+	/* now apply the information */
+	apply_cc_state(ppd);
 
 	return __subn_get_opa_cong_setting(smp, am, data, ibdev, port,
 					   resp_len);
@@ -3383,7 +3456,6 @@ static int __subn_set_opa_cc_table(struct opa_smp *smp, u32 am, u8 *data,
 	int i, j;
 	u32 sentry, eentry;
 	u16 ccti_limit;
-	struct cc_state *old_cc_state, *new_cc_state;
 
 	/* sanity check n_blocks, start_block */
 	if (n_blocks == 0 ||
@@ -3403,45 +3475,20 @@ static int __subn_set_opa_cc_table(struct opa_smp *smp, u32 am, u8 *data,
 		return reply((struct ib_mad_hdr *)smp);
 	}
 
-	new_cc_state = kzalloc(sizeof(*new_cc_state), GFP_KERNEL);
-	if (!new_cc_state)
-		goto getit;
-
+	/*
+	 * Save details from packet into the ppd.  Hold the cc_state_lock so
+	 * our information is consistent with anyone trying to apply the state.
+	 */
 	spin_lock(&ppd->cc_state_lock);
-
-	old_cc_state = get_cc_state(ppd);
-
-	if (!old_cc_state) {
-		spin_unlock(&ppd->cc_state_lock);
-		kfree(new_cc_state);
-		return reply((struct ib_mad_hdr *)smp);
-	}
-
-	*new_cc_state = *old_cc_state;
-
-	new_cc_state->cct.ccti_limit = ccti_limit;
-
-	entries = ppd->ccti_entries;
 	ppd->total_cct_entry = ccti_limit + 1;
-
+	entries = ppd->ccti_entries;
 	for (j = 0, i = sentry; i < eentry; j++, i++)
 		entries[i].entry = be16_to_cpu(p->ccti_entries[j].entry);
-
-	memcpy(new_cc_state->cct.entries, entries,
-	       eentry * sizeof(struct ib_cc_table_entry));
-
-	new_cc_state->cong_setting.port_control = IB_CC_CCS_PC_SL_BASED;
-	new_cc_state->cong_setting.control_map = ppd->cc_sl_control_map;
-	memcpy(new_cc_state->cong_setting.entries, ppd->congestion_entries,
-	       OPA_MAX_SLS * sizeof(struct opa_congestion_setting_entry));
-
-	rcu_assign_pointer(ppd->cc_state, new_cc_state);
-
 	spin_unlock(&ppd->cc_state_lock);
 
-	call_rcu(&old_cc_state->rcu, cc_state_reclaim);
+	/* now apply the information */
+	apply_cc_state(ppd);
 
-getit:
 	return __subn_get_opa_cc_table(smp, am, data, ibdev, port, resp_len);
 }
 
@@ -3458,19 +3505,24 @@ static int __subn_get_opa_led_info(struct opa_smp *smp, u32 am, u8 *data,
 				   u32 *resp_len)
 {
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
+	struct hfi1_pportdata *ppd = dd->pport;
 	struct opa_led_info *p = (struct opa_led_info *)data;
 	u32 nport = OPA_AM_NPORT(am);
-	u64 reg;
+	u32 is_beaconing_active;
 
 	if (nport != 1) {
 		smp->status |= IB_SMP_INVALID_FIELD;
 		return reply((struct ib_mad_hdr *)smp);
 	}
 
-	reg = read_csr(dd, DCC_CFG_LED_CNTRL);
-	if ((reg & DCC_CFG_LED_CNTRL_LED_CNTRL_SMASK) &&
-	    ((reg & DCC_CFG_LED_CNTRL_LED_SW_BLINK_RATE_SMASK) == 0xf))
-		p->rsvd_led_mask = cpu_to_be32(OPA_LED_MASK);
+	/*
+	 * This pairs with the memory barrier in hfi1_start_led_override to
+	 * ensure that we read the correct state of LED beaconing represented
+	 * by led_override_timer_active
+	 */
+	smp_rmb();
+	is_beaconing_active = !!atomic_read(&ppd->led_override_timer_active);
+	p->rsvd_led_mask = cpu_to_be32(is_beaconing_active << OPA_LED_SHIFT);
 
 	if (resp_len)
 		*resp_len += sizeof(struct opa_led_info);
@@ -3493,9 +3545,9 @@ static int __subn_set_opa_led_info(struct opa_smp *smp, u32 am, u8 *data,
 	}
 
 	if (on)
-		hfi1_set_led_override(dd->pport, 2000, 1500);
+		hfi1_start_led_override(dd->pport, 2000, 1500);
 	else
-		hfi1_set_led_override(dd->pport, 0, 0);
+		shutdown_led_override(dd->pport);
 
 	return __subn_get_opa_led_info(smp, am, data, ibdev, port, resp_len);
 }

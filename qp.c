@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -52,7 +49,6 @@
 #include <linux/vmalloc.h>
 #include <linux/hash.h>
 #include <linux/module.h>
-#include <linux/random.h>
 #include <linux/seq_file.h>
 
 #include "hfi.h"
@@ -588,8 +584,12 @@ static inline int opa_mtu_enum_to_int(int mtu)
  */
 static inline int verbs_mtu_enum_to_int(struct ib_device *dev, enum ib_mtu mtu)
 {
-	int val = opa_mtu_enum_to_int((int)mtu);
+	int val;
 
+	/* Constraining 10KB packets to 8KB packets */
+	if (mtu == (enum ib_mtu)OPA_MTU_10240)
+		mtu = OPA_MTU_8192;
+	val = opa_mtu_enum_to_int((int)mtu);
 	if (val > 0)
 		return val;
 	return ib_mtu_enum_to_int(mtu);
@@ -1233,6 +1233,7 @@ struct ib_qp *hfi1_create_qp(struct ib_pd *ibpd,
 				goto bail_ip;
 			}
 		}
+		qp->pid = current->pid;
 	}
 
 	spin_lock(&dev->n_qps_lock);
@@ -1765,7 +1766,7 @@ void qp_iter_print(struct seq_file *s, struct qp_iter *iter)
 	send_context = qp_to_send_context(qp, qp->s_sc);
 	wqe = get_swqe_ptr(qp, qp->s_last);
 	seq_printf(s,
-		   "N %d %s QP%x R %u %s %u %u %u f=%x %u %u %u %u %u %u PSN %x %x %x %x %x (%u %u %u %u %u %u %u) QP%x LID %x SL %u MTU %u %u %u %u SDE %p,%u SC %p,%u CQ %u %u\n",
+		   "N %d %s QP %x R %u %s %u %u %u f=%x %u %u %u %u %u %u PSN %x %x %x %x %x (%u %u %u %u %u %u %u) RQP %x LID %x SL %u MTU %u %u %u %u SDE %p,%u SC %p,%u SCQ %u %u PID %d\n",
 		   iter->n,
 		   qp_idle(qp) ? "I" : "B",
 		   qp->ibqp.qp_num,
@@ -1799,7 +1800,8 @@ void qp_iter_print(struct seq_file *s, struct qp_iter *iter)
 		   send_context,
 		   send_context ? send_context->sw_index : 0,
 		   to_icq(qp->ibqp.send_cq)->queue->head,
-		   to_icq(qp->ibqp.send_cq)->queue->tail);
+		   to_icq(qp->ibqp.send_cq)->queue->tail,
+		   qp->pid);
 }
 
 void qp_comm_est(struct hfi1_qp *qp)

@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -373,10 +370,10 @@ static inline void complete_tx(struct sdma_engine *sde,
 	callback_t complete = tx->complete;
 
 #ifdef CONFIG_HFI1_DEBUG_SDMA_ORDER
-	trace_hfi1_sdma_out_sn(sde, txp->sn);
-	if (WARN_ON_ONCE(sde->head_sn != txp->sn))
+	trace_hfi1_sdma_out_sn(sde, tx->sn);
+	if (WARN_ON_ONCE(sde->head_sn != tx->sn))
 		dd_dev_err(sde->dd, "expected %llu got %llu\n",
-			   sde->head_sn, txp->sn);
+			   sde->head_sn, tx->sn);
 	sde->head_sn++;
 #endif
 	sdma_txclean(sde->dd, tx);
@@ -989,7 +986,7 @@ static void sdma_clean(struct hfi1_devdata *dd, size_t num_engines)
 		sde->tx_ring = NULL;
 	}
 	spin_lock_irq(&dd->sde_map_lock);
-	kfree(rcu_access_pointer(dd->sdma_map));
+	sdma_map_free(rcu_access_pointer(dd->sdma_map));
 	RCU_INIT_POINTER(dd->sdma_map, NULL);
 	spin_unlock_irq(&dd->sde_map_lock);
 	synchronize_rcu();
@@ -1625,6 +1622,10 @@ static void sdma_sendctrl(struct sdma_engine *sde, unsigned op)
 		write_sde_csr(sde, SD(CTRL), sde->p_senddmactrl);
 
 	spin_unlock_irqrestore(&sde->senddmactrl_lock, flags);
+
+#ifdef CONFIG_SDMA_VERBOSITY
+	sdma_dumpstate(sde);
+#endif
 }
 
 static void sdma_setlengen(struct sdma_engine *sde)
@@ -1760,6 +1761,7 @@ static void init_sdma_regs(
 void sdma_dumpstate(struct sdma_engine *sde)
 {
 	u64 csr;
+	unsigned i;
 
 	sdma_dumpstate_helper(SD(CTRL));
 	sdma_dumpstate_helper(SD(STATUS));
@@ -1767,6 +1769,13 @@ void sdma_dumpstate(struct sdma_engine *sde)
 	sdma_dumpstate_helper0(SD(ERR_MASK));
 	sdma_dumpstate_helper(SD(ENG_ERR_STATUS));
 	sdma_dumpstate_helper(SD(ENG_ERR_MASK));
+
+	for (i = 0; i < CCE_NUM_INT_CSRS; ++i) {
+		sdma_dumpstate_helper2(CCE_INT_STATUS);
+		sdma_dumpstate_helper2(CCE_INT_MASK);
+		sdma_dumpstate_helper2(CCE_INT_BLOCKED);
+	}
+
 	sdma_dumpstate_helper(SD(TAIL));
 	sdma_dumpstate_helper(SD(HEAD));
 	sdma_dumpstate_helper(SD(PRIORITY_THLD));

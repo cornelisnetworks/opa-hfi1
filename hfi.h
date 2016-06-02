@@ -1,13 +1,12 @@
 #ifndef _HFI1_KERNEL_H
 #define _HFI1_KERNEL_H
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -19,8 +18,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -455,11 +452,12 @@ struct hfi1_sge_state;
 #define HLS_LINK_COOLDOWN BIT(__HLS_LINK_COOLDOWN_BP)
 
 #define HLS_UP (HLS_UP_INIT | HLS_UP_ARMED | HLS_UP_ACTIVE)
+#define HLS_DOWN ~(HLS_UP)
 
 /* use this MTU size if none other is given */
-#define HFI1_DEFAULT_ACTIVE_MTU 8192
+#define HFI1_DEFAULT_ACTIVE_MTU 10240
 /* use this MTU size as the default maximum */
-#define HFI1_DEFAULT_MAX_MTU 8192
+#define HFI1_DEFAULT_MAX_MTU 10240
 /* default partition key */
 #define DEFAULT_PKEY 0xffff
 
@@ -665,6 +663,7 @@ struct hfi1_pportdata {
 	u8 link_enabled;	/* link enabled? */
 	u8 linkinit_reason;
 	u8 local_tx_rate;	/* rate given to 8051 firmware */
+	u8 last_pstate;		/* info only */
 
 	/* placeholders for IB MAD packet settings */
 	u8 overrun_threshold;
@@ -803,6 +802,12 @@ struct hfi1_temp {
 	u8 triggers;      /* temperature triggers */
 };
 
+/* common data between shared ASIC HFIs */
+struct hfi1_asic_data {
+	struct hfi1_devdata *dds[2];	/* back pointers */
+	struct mutex asic_resource_mutex;
+};
+
 /* device data struct now contains only "general per-device" info.
  * fields related to a physical IB port are in a hfi1_pportdata struct.
  */
@@ -877,6 +882,9 @@ struct hfi1_devdata {
 	/* SPC freeze waitqueue and variable */
 	wait_queue_head_t		  sdma_unfreeze_wq;
 	atomic_t			  sdma_unfreeze_count;
+
+	/* common data between shared ASIC HFIs in this OS */
+	struct hfi1_asic_data *asic_data;
 
 	/* hfi1_pportdata, points to array of (physical) port-specific
 	 * data structs, indexed by pidx (0..n-1)
@@ -1037,8 +1045,6 @@ struct hfi1_devdata {
 
 	struct platform_config platform_config;
 	struct platform_config_cache pcfg_cache;
-	/* control high-level access to qsfp */
-	struct mutex qsfp_i2c_mutex;
 
 	struct diag_client *diag_client;
 	spinlock_t hfi1_diag_trans_lock; /* protect diag observer ops */
@@ -1154,6 +1160,7 @@ struct hfi1_devdata {
 	__le64 *rcvhdrtail_dummy_kvaddr;
 	dma_addr_t rcvhdrtail_dummy_physaddr;
 
+	bool eprom_available;	/* true if EPROM is available for this device */
 	bool aspm_supported;	/* Does HW support ASPM */
 	bool aspm_enabled;	/* ASPM state: enabled/disabled */
 	/* Serialize ASPM enable/disable between multiple verbs contexts */
@@ -1249,7 +1256,7 @@ static inline int hdr2sc(struct hfi1_message_header *hdr, u64 rhf)
 {
 	return
 		((be16_to_cpu(hdr->lrh[0]) >> 12) & 0xf) |
-		((!!(rhf & RHF_DC_INFO_MASK)) << 4);
+		((!!(rhf & RHF_DC_INFO_SMASK)) << 4);
 }
 
 static inline u16 generate_jkey(kuid_t uid)
@@ -1324,6 +1331,9 @@ void process_becn(struct hfi1_pportdata *ppd, u8 sl,  u16 rlid, u32 lqpn,
 void return_cnp(struct hfi1_ibport *ibp, struct hfi1_qp *qp, u32 remote_qpn,
 		u32 pkey, u32 slid, u32 dlid, u8 sc5,
 		const struct ib_grh *old_grh);
+#define PKEY_CHECK_INVALID -1
+int egress_pkey_check(struct hfi1_pportdata *ppd, __be16 *lrh, __be32 *bth,
+		      u8 sc5, int8_t s_pkey_index);
 
 #define PACKET_EGRESS_TIMEOUT 350
 static inline void pause_for_credit_return(struct hfi1_devdata *dd)
@@ -1520,6 +1530,7 @@ int snoop_send_pio_handler(struct hfi1_qp *qp, struct hfi1_pkt_state *ps,
 			   u64 pbc);
 void snoop_inline_pio_send(struct hfi1_devdata *dd, struct pio_buf *pbuf,
 			   u64 pbc, const void *from, size_t count);
+int set_buffer_control(struct hfi1_pportdata *ppd, struct buffer_control *bc);
 
 static inline struct hfi1_devdata *dd_from_ppd(struct hfi1_pportdata *ppd)
 {
@@ -1584,7 +1595,6 @@ static inline struct cc_state *get_cc_state(struct hfi1_pportdata *ppd)
 #define HFI1_HAS_SDMA_TIMEOUT  0x8
 #define HFI1_HAS_SEND_DMA      0x10   /* Supports Send DMA */
 #define HFI1_FORCED_FREEZE     0x80   /* driver forced freeze mode */
-#define HFI1_DO_INIT_ASIC      0x100  /* This device will init the ASIC */
 
 /* IB dword length mask in PBC (lower 11 bits); same for all chips */
 #define HFI1_PBC_LENGTH_MASK                     ((1 << 11) - 1)
@@ -1606,13 +1616,9 @@ void hfi1_free_devdata(struct hfi1_devdata *);
 void cc_state_reclaim(struct rcu_head *rcu);
 struct hfi1_devdata *hfi1_alloc_devdata(struct pci_dev *pdev, size_t extra);
 
-void hfi1_set_led_override(struct hfi1_pportdata *ppd, unsigned int timeon,
-			   unsigned int timeoff);
-/*
- * Only to be used for driver unload or device reset where we cannot allow
- * the timer to fire even the one extra time, else use hfi1_set_led_override
- * with timeon = timeoff = 0
- */
+/* LED beaconing functions */
+void hfi1_start_led_override(struct hfi1_pportdata *ppd, unsigned int timeon,
+			     unsigned int timeoff);
 void shutdown_led_override(struct hfi1_pportdata *ppd);
 
 #define HFI1_CREDIT_RETURN_RATE (100)
@@ -1765,6 +1771,7 @@ extern struct mutex hfi1_mutex;
 
 #define HFI1_PKT_USER_SC_INTEGRITY					    \
 	(SEND_CTXT_CHECK_ENABLE_DISALLOW_NON_KDETH_PACKETS_SMASK	    \
+	| SEND_CTXT_CHECK_ENABLE_DISALLOW_KDETH_PACKETS_SMASK		\
 	| SEND_CTXT_CHECK_ENABLE_DISALLOW_BYPASS_SMASK		    \
 	| SEND_CTXT_CHECK_ENABLE_DISALLOW_GRH_SMASK)
 
@@ -1864,9 +1871,8 @@ static inline u64 hfi1_pkt_base_sdma_integrity(struct hfi1_devdata *dd)
 			get_unit_name((dd)->unit), ##__VA_ARGS__)
 
 #define hfi1_dev_porterr(dd, port, fmt, ...) \
-	dev_err(&(dd)->pcidev->dev, "%s: IB%u:%u " fmt, \
-			get_unit_name((dd)->unit), (dd)->unit, (port), \
-			##__VA_ARGS__)
+	dev_err(&(dd)->pcidev->dev, "%s: port %u: " fmt, \
+			get_unit_name((dd)->unit), (port), ##__VA_ARGS__)
 
 /*
  * this is used for formatting hw error messages...
@@ -1912,6 +1918,18 @@ static inline void setextled(struct hfi1_devdata *dd, u32 on)
 		write_csr(dd, DCC_CFG_LED_CNTRL, 0x1F);
 	else
 		write_csr(dd, DCC_CFG_LED_CNTRL, 0x10);
+}
+
+/* return the i2c resource given the target */
+static inline u32 i2c_target(u32 target)
+{
+	return target ? CR_I2C2 : CR_I2C1;
+}
+
+/* return the i2c chain chip resource that this HFI uses for QSFP */
+static inline u32 qsfp_resource(struct hfi1_devdata *dd)
+{
+	return i2c_target(dd->hfi1_id);
 }
 
 int hfi1_tempsense_rd(struct hfi1_devdata *dd, struct hfi1_temp *temp);

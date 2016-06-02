@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -321,7 +318,7 @@ int hfi1_make_ud_req(struct hfi1_qp *qp, struct hfi1_pkt_state *ps)
 					   (lid == HFI1_PERMISSIVE_LID &&
 					    qp->ibqp.qp_type ==
 					    IB_QPT_GSI)))) {
-			unsigned long flags = 0;
+			unsigned long tflags = ps->flags;
 			/*
 			 * If DMAs are in progress, we can't generate
 			 * a completion for the loopback packet since
@@ -334,9 +331,10 @@ int hfi1_make_ud_req(struct hfi1_qp *qp, struct hfi1_pkt_state *ps)
 				goto bail;
 			}
 			qp->s_cur = next_cur;
-			spin_unlock_irqrestore(&qp->s_lock, flags);
+			spin_unlock_irqrestore(&qp->s_lock, tflags);
 			ud_loopback(qp, wqe);
-			spin_lock_irqsave(&qp->s_lock, flags);
+			spin_lock_irqsave(&qp->s_lock, tflags);
+			ps->flags = tflags;
 			hfi1_send_complete(qp, wqe, IB_WC_SUCCESS);
 			goto done_free_tx;
 		}
@@ -347,9 +345,6 @@ int hfi1_make_ud_req(struct hfi1_qp *qp, struct hfi1_pkt_state *ps)
 	nwords = (wqe->length + extra_bytes) >> 2;
 
 	/* header size in 32-bit words LRH+BTH+DETH = (8+12+8)/4. */
-	qp->s_hdrwords = 7;
-	/* pbc */
-	ps->s_txreq->hdr_dwords = qp->s_hdrwords + 2;
 	qp->s_hdrwords = 7;
 	qp->s_cur_size = wqe->length;
 	qp->s_cur_sge = &qp->s_sge;
@@ -436,6 +431,7 @@ int hfi1_make_ud_req(struct hfi1_qp *qp, struct hfi1_pkt_state *ps)
 	qp->s_hdr->ahgidx = 0;
 	qp->s_hdr->tx_flags = 0;
 	qp->s_hdr->sde = NULL;
+	/* pbc */
 	ps->s_txreq->hdr_dwords = qp->s_hdrwords + 2;
 	return 1;
 

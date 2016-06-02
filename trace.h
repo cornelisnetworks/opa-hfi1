@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -78,8 +75,8 @@ __print_symbolic(etype,                         \
 
 TRACE_EVENT(hfi1_rcvhdr,
 	    TP_PROTO(struct hfi1_devdata *dd,
-		     u64 eflags,
 		     u32 ctxt,
+		     u64 eflags,
 		     u32 etype,
 		     u32 hlen,
 		     u32 tlen,
@@ -643,7 +640,15 @@ DEFINE_EVENT(hfi1_ibhdr_template, input_ibhdr,
 	     TP_PROTO(struct hfi1_devdata *dd, struct hfi1_ib_header *hdr),
 	     TP_ARGS(dd, hdr));
 
-DEFINE_EVENT(hfi1_ibhdr_template, output_ibhdr,
+DEFINE_EVENT(hfi1_ibhdr_template, pio_output_ibhdr,
+	     TP_PROTO(struct hfi1_devdata *dd, struct hfi1_ib_header *hdr),
+	     TP_ARGS(dd, hdr));
+
+DEFINE_EVENT(hfi1_ibhdr_template, ack_output_ibhdr,
+	     TP_PROTO(struct hfi1_devdata *dd, struct hfi1_ib_header *hdr),
+	     TP_ARGS(dd, hdr));
+
+DEFINE_EVENT(hfi1_ibhdr_template, sdma_output_ibhdr,
 	     TP_PROTO(struct hfi1_devdata *dd, struct hfi1_ib_header *hdr),
 	     TP_ARGS(dd, hdr));
 

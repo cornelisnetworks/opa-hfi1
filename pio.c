@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -143,23 +140,30 @@ void pio_send_control(struct hfi1_devdata *dd, int op)
 /* Send Context Size (SCS) wildcards */
 #define SCS_POOL_0 -1
 #define SCS_POOL_1 -2
+
 /* Send Context Count (SCC) wildcards */
 #define SCC_PER_VL -1
 #define SCC_PER_CPU  -2
-
 #define SCC_PER_KRCVQ  -3
-#define SCC_ACK_CREDITS  32
+
+/* Send Context Size (SCS) constants */
+#define SCS_ACK_CREDITS  32
+#define SCS_VL15_CREDITS 102	/* 3 pkts of 2048B data + 128B header */
+
+#define PIO_THRESHOLD_CEILING 4096
 
 #define PIO_WAIT_BATCH_SIZE 5
 
 /* default send context sizes */
 static struct sc_config_sizes sc_config_sizes[SC_MAX] = {
 	[SC_KERNEL] = { .size  = SCS_POOL_0,	/* even divide, pool 0 */
-			.count = SCC_PER_VL },/* one per NUMA */
-	[SC_ACK]    = { .size  = SCC_ACK_CREDITS,
+			.count = SCC_PER_VL },	/* one per NUMA */
+	[SC_ACK]    = { .size  = SCS_ACK_CREDITS,
 			.count = SCC_PER_KRCVQ },
 	[SC_USER]   = { .size  = SCS_POOL_0,	/* even divide, pool 0 */
 			.count = SCC_PER_CPU },	/* one per CPU */
+	[SC_VL15]   = { .size  = SCS_VL15_CREDITS,
+			.count = 1 },
 
 };
 
@@ -205,7 +209,8 @@ static int wildcard_to_pool(int wc)
 static const char *sc_type_names[SC_MAX] = {
 	"kernel",
 	"ack",
-	"user"
+	"user",
+	"vl15"
 };
 
 static const char *sc_type_name(int index)
@@ -232,6 +237,22 @@ int init_sc_pools_and_sizes(struct hfi1_devdata *dd)
 	int ab_total;		/* absolute block total */
 	int extra;
 	int i;
+
+	/*
+	 * When SDMA is enabled, kernel context pio packet size is capped by
+	 * "piothreshold". Reduce pio buffer allocation for kernel context by
+	 * setting it to a fixed size. The allocation allows 3-deep buffering
+	 * of the largest pio packets plus up to 128 bytes header, sufficient
+	 * to maintain verbs performance.
+	 *
+	 * When SDMA is disabled, keep the default pooling allocation.
+	 */
+	if (HFI1_CAP_IS_KSET(SDMA)) {
+		u16 max_pkt_size = (piothreshold < PIO_THRESHOLD_CEILING) ?
+					 piothreshold : PIO_THRESHOLD_CEILING;
+		sc_config_sizes[SC_KERNEL].size =
+			3 * (max_pkt_size + 128) / PIO_BLOCK_SIZE;
+	}
 
 	/*
 	 * Step 0:
@@ -314,7 +335,7 @@ int init_sc_pools_and_sizes(struct hfi1_devdata *dd)
 		if (i == SC_ACK) {
 			count = dd->n_krcv_queues;
 		} else if (i == SC_KERNEL) {
-			count = (INIT_SC_PER_VL * num_vls) + 1 /* VL15 */;
+			count = INIT_SC_PER_VL * num_vls;
 		} else if (count == SCC_PER_CPU) {
 			count = dd->num_rcv_contexts - dd->n_krcv_queues;
 		} else if (count < 0) {
@@ -600,7 +621,7 @@ u32 sc_mtu_to_threshold(struct send_context *sc, u32 mtu, u32 hdrqentsize)
  * Return value is what to write into the CSR: trigger return when
  * unreturned credits pass this count.
  */
-static u32 sc_percent_to_threshold(struct send_context *sc, u32 percent)
+u32 sc_percent_to_threshold(struct send_context *sc, u32 percent)
 {
 	return (sc->credits * percent) / 100;
 }
@@ -795,7 +816,10 @@ struct send_context *sc_alloc(struct hfi1_devdata *dd, int type,
 	 * For Ack contexts, set a threshold for half the credits.
 	 * For User contexts use the given percentage.  This has been
 	 * sanitized on driver start-up.
-	 * For Kernel contexts, use the default MTU plus a header.
+	 * For Kernel contexts, use the default MTU plus a header
+	 * or half the credits, whichever is smaller. This should
+	 * work for both the 3-deep buffering allocation and the
+	 * pooling allocation.
 	 */
 	if (type == SC_ACK) {
 		thresh = sc_percent_to_threshold(sc, 50);
@@ -803,7 +827,9 @@ struct send_context *sc_alloc(struct hfi1_devdata *dd, int type,
 		thresh = sc_percent_to_threshold(sc,
 						 user_credit_return_threshold);
 	} else { /* kernel */
-		thresh = sc_mtu_to_threshold(sc, hfi1_max_mtu, hdrqentsize);
+		thresh = min(sc_percent_to_threshold(sc, 50),
+			     sc_mtu_to_threshold(sc, hfi1_max_mtu,
+						 hdrqentsize));
 	}
 	reg = thresh << SC(CREDIT_CTRL_THRESHOLD_SHIFT);
 	/* add in early return */
@@ -1538,7 +1564,8 @@ static void sc_piobufavail(struct send_context *sc)
 	unsigned long flags;
 	unsigned i, n = 0;
 
-	if (dd->send_contexts[sc->sw_index].type != SC_KERNEL)
+	if (dd->send_contexts[sc->sw_index].type != SC_KERNEL &&
+	    dd->send_contexts[sc->sw_index].type != SC_VL15)
 		return;
 	list = &sc->piowait;
 	/*
@@ -1889,7 +1916,7 @@ void free_pio_map(struct hfi1_devdata *dd)
 	/* Free PIO map if allocated */
 	if (rcu_access_pointer(dd->pio_map)) {
 		spin_lock_irq(&dd->pio_map_lock);
-		kfree(rcu_access_pointer(dd->pio_map));
+		pio_map_free(rcu_access_pointer(dd->pio_map));
 		RCU_INIT_POINTER(dd->pio_map, NULL);
 		spin_unlock_irq(&dd->pio_map_lock);
 		synchronize_rcu();
@@ -1906,7 +1933,7 @@ int init_pervl_scs(struct hfi1_devdata *dd)
 	u32 ctxt;
 	struct hfi1_pportdata *ppd = dd->pport;
 
-	dd->vld[15].sc = sc_alloc(dd, SC_KERNEL,
+	dd->vld[15].sc = sc_alloc(dd, SC_VL15,
 				  dd->rcd[0]->rcvhdrqentsize, dd->node);
 	if (!dd->vld[15].sc)
 		goto nomem;

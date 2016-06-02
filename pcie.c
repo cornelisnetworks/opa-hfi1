@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -789,7 +786,7 @@ static int load_eq_table(struct hfi1_devdata *dd, const u8 eq[11][3], u8 fs,
 /*
  * Steps to be done after the PCIe firmware is downloaded and
  * before the SBR for the Pcie Gen3.
- * The hardware mutex is already being held.
+ * The SBus resource is already being held.
  */
 static void pcie_post_steps(struct hfi1_devdata *dd)
 {
@@ -965,7 +962,6 @@ int do_pcie_gen3_transition(struct hfi1_devdata *dd)
 	uint default_pset;
 	u16 target_vector, target_speed;
 	u16 lnkctl2, vendor;
-	u8 nsbr = 1;
 	u8 div;
 	const u8 (*eq)[3];
 	int return_error = 0;
@@ -1009,12 +1005,6 @@ int do_pcie_gen3_transition(struct hfi1_devdata *dd)
 	}
 
 	/*
-	 * A0 needs an additional SBR
-	 */
-	if (is_ax(dd))
-		nsbr++;
-
-	/*
 	 * Do the Gen3 transition.  Steps are those of the PCIe Gen3
 	 * recipe.
 	 */
@@ -1028,10 +1018,13 @@ int do_pcie_gen3_transition(struct hfi1_devdata *dd)
 		goto done_no_mutex;
 	}
 
-	/* hold the HW mutex across the firmware download and SBR */
-	ret = acquire_hw_mutex(dd);
-	if (ret)
+	/* hold the SBus resource across the firmware download and SBR */
+	ret = acquire_chip_resource(dd, CR_SBUS, SBUS_TIMEOUT);
+	if (ret) {
+		dd_dev_err(dd, "%s: unable to acquire SBus resource\n",
+			   __func__);
 		return ret;
+	}
 
 	/* make sure thermal polling is not causing interrupts */
 	therm = read_csr(dd, ASIC_CFG_THERM_POLL_EN);
@@ -1340,7 +1333,7 @@ done:
 		dd_dev_info(dd, "%s: Re-enable therm polling\n",
 			    __func__);
 	}
-	release_hw_mutex(dd);
+	release_chip_resource(dd, CR_SBUS);
 done_no_mutex:
 	/* return no error if it is OK to be at current speed */
 	if (ret && !return_error) {

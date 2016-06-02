@@ -2,13 +2,12 @@
 #define DEF_CHIP_REG
 
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -20,8 +19,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -774,6 +771,7 @@
 #define RCV_RSM_CFG_ENABLE_OR_CHAIN_RSM0_MASK 0x1ull
 #define RCV_RSM_CFG_ENABLE_OR_CHAIN_RSM0_SHIFT 0
 #define RCV_RSM_CFG_PACKET_TYPE_SHIFT 60
+#define RCV_RSM_CFG_OFFSET_SHIFT 32
 #define RCV_RSM_MAP_TABLE (RXE + 0x000000000900)
 #define RCV_RSM_MAP_TABLE_RCV_CONTEXT_A_MASK 0xFFull
 #define RCV_RSM_MATCH (RXE + 0x000000000800)

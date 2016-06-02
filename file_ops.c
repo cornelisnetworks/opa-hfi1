@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -198,6 +195,10 @@ static ssize_t hfi1_file_write(struct file *fp, const char __user *data,
 	__u64 user_val = 0;
 	int uctxt_required = 1;
 	int must_be_root = 0;
+	bool access_allowed = fp->f_cred == current_cred() && segment_eq(get_fs(), USER_DS);
+
+	if (WARN_ON_ONCE(!access_allowed))
+		return -EACCES;
 
 	if (count < sizeof(cmd)) {
 		ret = -EINVAL;
@@ -1575,29 +1576,8 @@ static loff_t ui_lseek(struct file *filp, loff_t offset, int whence)
 {
 	struct hfi1_devdata *dd = filp->private_data;
 
-	switch (whence) {
-	case SEEK_SET:
-		break;
-	case SEEK_CUR:
-		offset += filp->f_pos;
-		break;
-	case SEEK_END:
-		offset = ((dd->kregend - dd->kregbase) + DC8051_DATA_MEM_SIZE) -
-			offset;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	if (offset < 0)
-		return -EINVAL;
-
-	if (offset >= (dd->kregend - dd->kregbase) + DC8051_DATA_MEM_SIZE)
-		return -EINVAL;
-
-	filp->f_pos = offset;
-
-	return filp->f_pos;
+	return fixed_size_llseek(filp, offset, whence,
+		(dd->kregend - dd->kregbase) + DC8051_DATA_MEM_SIZE);
 }
 
 /* NOTE: assumes unsigned long is 8 bytes */

@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -430,9 +427,10 @@ static enum hrtimer_restart cca_timer_fn(struct hrtimer *t)
 	struct cca_timer *cca_timer;
 	struct hfi1_pportdata *ppd;
 	int sl;
-	u16 ccti, ccti_timer, ccti_min;
+	u16 ccti_timer, ccti_min;
 	struct cc_state *cc_state;
 	unsigned long flags;
+	enum hrtimer_restart ret = HRTIMER_NORESTART;
 
 	cca_timer = container_of(t, struct cca_timer, hrtimer);
 	ppd = cca_timer->ppd;
@@ -458,24 +456,21 @@ static enum hrtimer_restart cca_timer_fn(struct hrtimer *t)
 
 	spin_lock_irqsave(&ppd->cca_timer_lock, flags);
 
-	ccti = cca_timer->ccti;
-
-	if (ccti > ccti_min) {
+	if (cca_timer->ccti > ccti_min) {
 		cca_timer->ccti--;
 		set_link_ipg(ppd);
 	}
 
-	spin_unlock_irqrestore(&ppd->cca_timer_lock, flags);
-
-	rcu_read_unlock();
-
-	if (ccti > ccti_min) {
+	if (cca_timer->ccti > ccti_min) {
 		unsigned long nsec = 1024 * ccti_timer;
 		/* ccti_timer is in units of 1.024 usec */
 		hrtimer_forward_now(t, ns_to_ktime(nsec));
-		return HRTIMER_RESTART;
+		ret = HRTIMER_RESTART;
 	}
-	return HRTIMER_NORESTART;
+
+	spin_unlock_irqrestore(&ppd->cca_timer_lock, flags);
+	rcu_read_unlock();
+	return ret;
 }
 
 /*
@@ -980,6 +975,25 @@ void hfi1_free_ctxtdata(struct hfi1_devdata *dd, struct hfi1_ctxtdata *rcd)
 	kfree(rcd);
 }
 
+/*
+ * Release our hold on the shared asic data.  If we are the last one,
+ * free the structure.  Must be holding hfi1_devs_lock.
+ */
+static void release_asic_data(struct hfi1_devdata *dd)
+{
+	int other;
+
+	if (!dd->asic_data)
+		return;
+	dd->asic_data->dds[dd->hfi1_id] = NULL;
+	other = dd->hfi1_id ? 0 : 1;
+	if (!dd->asic_data->dds[other]) {
+		/* we are the last holder, free it */
+		kfree(dd->asic_data);
+	}
+	dd->asic_data = NULL;
+}
+
 void hfi1_free_devdata(struct hfi1_devdata *dd)
 {
 	unsigned long flags;
@@ -987,9 +1001,9 @@ void hfi1_free_devdata(struct hfi1_devdata *dd)
 	spin_lock_irqsave(&hfi1_devs_lock, flags);
 	idr_remove(&hfi1_unit_table, dd->unit);
 	list_del(&dd->list);
+	release_asic_data(dd);
 	spin_unlock_irqrestore(&hfi1_devs_lock, flags);
 	free_platform_config(dd);
-	hfi1_dbg_ibdev_exit(&dd->verbs_dev);
 	rcu_barrier(); /* wait for rcu callbacks to complete */
 	free_percpu(dd->int_counter);
 	free_percpu(dd->rcv_limit);
@@ -1049,7 +1063,6 @@ struct hfi1_devdata *hfi1_alloc_devdata(struct pci_dev *pdev, size_t extra)
 	spin_lock_init(&dd->sc_init_lock);
 	spin_lock_init(&dd->dc8051_lock);
 	spin_lock_init(&dd->dc8051_memlock);
-	mutex_init(&dd->qsfp_i2c_mutex);
 	seqlock_init(&dd->sc2vl_lock);
 	spin_lock_init(&dd->sde_map_lock);
 	spin_lock_init(&dd->pio_map_lock);
@@ -1091,7 +1104,6 @@ struct hfi1_devdata *hfi1_alloc_devdata(struct pci_dev *pdev, size_t extra)
 			&pdev->dev,
 			"Could not alloc cpulist info, cpu affinity might be wrong\n");
 	}
-	hfi1_dbg_ibdev_init(&dd->verbs_dev);
 	return dd;
 
 bail:
@@ -1335,6 +1347,8 @@ static void cleanup_device_data(struct hfi1_devdata *dd)
 	dd->num_send_contexts = 0;
 	kfree(dd->send_contexts);
 	dd->send_contexts = NULL;
+	kfree(dd->hw_to_sw);
+	dd->hw_to_sw = NULL;
 	kfree(dd->boardname);
 	vfree(dd->events);
 	vfree(dd->status);
@@ -1455,8 +1469,11 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 * we still create devices, so diags, etc. can be used
 	 * to determine cause of problem.
 	 */
-	if (!initfail && !ret)
+	if (!initfail && !ret) {
 		dd->flags |= HFI1_INITTED;
+		/* create debufs files after init and ib register */
+		hfi1_dbg_ibdev_init(&dd->verbs_dev);
+	}
 
 	j = hfi1_device_create(dd);
 	if (j)
@@ -1497,6 +1514,8 @@ static void remove_one(struct pci_dev *pdev)
 {
 	struct hfi1_devdata *dd = pci_get_drvdata(pdev);
 
+	/* close debugfs files before ib unregister */
+	hfi1_dbg_ibdev_exit(&dd->verbs_dev);
 	/* unregister from IB core */
 	hfi1_unregister_ib_device(dd);
 

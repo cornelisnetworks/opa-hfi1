@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -201,7 +198,7 @@ static const struct firmware *platform_config;
 #define RSA_ENGINE_TIMEOUT 100 /* ms */
 
 /* hardware mutex timeout, in ms */
-#define HM_TIMEOUT 4000 /* 4 s */
+#define HM_TIMEOUT 10 /* ms */
 
 /* 8051 memory access timeout, in us */
 #define DC8051_ACCESS_TIMEOUT 100 /* us */
@@ -1138,15 +1135,23 @@ static void turn_off_spicos(struct hfi1_devdata *dd, int flags)
  */
 void fabric_serdes_reset(struct hfi1_devdata *dd)
 {
+	int ret;
+
 	if (!fw_fabric_serdes_load)
 		return;
+
+	ret = acquire_chip_resource(dd, CR_SBUS, SBUS_TIMEOUT);
+	if (ret) {
+		dd_dev_err(dd,
+			   "Cannot acquire SBus resource to reset fabric SerDes - perhaps you should reboot\n");
+		return;
+	}
+	set_sbus_fast_mode(dd);
 
 	if (is_ax(dd)) {
 		/* A0 serdes do not work with a re-download */
 		u8 ra = fabric_serdes_broadcast[dd->hfi1_id];
 
-		acquire_hw_mutex(dd);
-		set_sbus_fast_mode(dd);
 		/* place SerDes in reset and disable SPICO */
 		sbus_request(dd, ra, 0x07, WRITE_SBUS_RECEIVER, 0x00000011);
 		/* wait 100 refclk cycles @ 156.25MHz => 640ns */
@@ -1155,26 +1160,20 @@ void fabric_serdes_reset(struct hfi1_devdata *dd)
 		sbus_request(dd, ra, 0x07, WRITE_SBUS_RECEIVER, 0x00000010);
 		/* turn SPICO enable on */
 		sbus_request(dd, ra, 0x07, WRITE_SBUS_RECEIVER, 0x00000002);
-		clear_sbus_fast_mode(dd);
-		release_hw_mutex(dd);
-		return;
+	} else {
+		turn_off_spicos(dd, SPICO_FABRIC);
+		/*
+		 * No need for firmware retry - what to download has already
+		 * been decided.
+		 * No need to pay attention to the load return - the only
+		 * failure is a validation failure, which has already been
+		 * checked by the initial download.
+		 */
+		(void)load_fabric_serdes_firmware(dd, &fw_fabric);
 	}
 
-	acquire_hw_mutex(dd);
-	set_sbus_fast_mode(dd);
-
-	turn_off_spicos(dd, SPICO_FABRIC);
-	/*
-	 * No need for firmware retry - what to download has already been
-	 * decided.
-	 * No need to pay attention to the load return - the only failure
-	 * is a validation failure, which has already been checked by the
-	 * initial download.
-	 */
-	(void)load_fabric_serdes_firmware(dd, &fw_fabric);
-
 	clear_sbus_fast_mode(dd);
-	release_hw_mutex(dd);
+	release_chip_resource(dd, CR_SBUS);
 }
 
 /* Access to the SBus in this routine should probably be serialized */
@@ -1182,6 +1181,9 @@ int sbus_request_slow(struct hfi1_devdata *dd,
 		      u8 receiver_addr, u8 data_addr, u8 command, u32 data_in)
 {
 	u64 reg, count = 0;
+
+	/* make sure fast mode is clear */
+	clear_sbus_fast_mode(dd);
 
 	sbus_request(dd, receiver_addr, data_addr, command, data_in);
 	write_csr(dd, ASIC_CFG_SBUS_EXECUTE,
@@ -1395,6 +1397,200 @@ void release_hw_mutex(struct hfi1_devdata *dd)
 	write_csr(dd, ASIC_CFG_MUTEX, 0);
 }
 
+/* return the given resource bit(s) as a mask for the given HFI */
+static inline u64 resource_mask(u32 hfi1_id, u32 resource)
+{
+	return ((u64)resource) << (hfi1_id ? CR_DYN_SHIFT : 0);
+}
+
+static void fail_mutex_acquire_message(struct hfi1_devdata *dd,
+				       const char *func)
+{
+	dd_dev_err(dd,
+		   "%s: hardware mutex stuck - suggest rebooting the machine\n",
+		   func);
+}
+
+/*
+ * Acquire access to a chip resource.
+ *
+ * Return 0 on success, -EBUSY if resource busy, -EIO if mutex acquire failed.
+ */
+static int __acquire_chip_resource(struct hfi1_devdata *dd, u32 resource)
+{
+	u64 scratch0, all_bits, my_bit;
+	int ret;
+
+	if (resource & CR_DYN_MASK) {
+		/* a dynamic resource is in use if either HFI has set the bit */
+		if (dd->pcidev->device == PCI_DEVICE_ID_INTEL0 &&
+		    (resource & (CR_I2C1 | CR_I2C2))) {
+			/* discrete devices must serialize across both chains */
+			all_bits = resource_mask(0, CR_I2C1 | CR_I2C2) |
+					resource_mask(1, CR_I2C1 | CR_I2C2);
+		} else {
+			all_bits = resource_mask(0, resource) |
+						resource_mask(1, resource);
+		}
+		my_bit = resource_mask(dd->hfi1_id, resource);
+	} else {
+		/* non-dynamic resources are not split between HFIs */
+		all_bits = resource;
+		my_bit = resource;
+	}
+
+	/* lock against other callers within the driver wanting a resource */
+	mutex_lock(&dd->asic_data->asic_resource_mutex);
+
+	ret = acquire_hw_mutex(dd);
+	if (ret) {
+		fail_mutex_acquire_message(dd, __func__);
+		ret = -EIO;
+		goto done;
+	}
+
+	scratch0 = read_csr(dd, ASIC_CFG_SCRATCH);
+	if (scratch0 & all_bits) {
+		ret = -EBUSY;
+	} else {
+		write_csr(dd, ASIC_CFG_SCRATCH, scratch0 | my_bit);
+		/* force write to be visible to other HFI on another OS */
+		(void)read_csr(dd, ASIC_CFG_SCRATCH);
+	}
+
+	release_hw_mutex(dd);
+
+done:
+	mutex_unlock(&dd->asic_data->asic_resource_mutex);
+	return ret;
+}
+
+/*
+ * Acquire access to a chip resource, wait up to mswait milliseconds for
+ * the resource to become available.
+ *
+ * Return 0 on success, -EBUSY if busy (even after wait), -EIO if mutex
+ * acquire failed.
+ */
+int acquire_chip_resource(struct hfi1_devdata *dd, u32 resource, u32 mswait)
+{
+	unsigned long timeout;
+	int ret;
+
+	timeout = jiffies + msecs_to_jiffies(mswait);
+	while (1) {
+		ret = __acquire_chip_resource(dd, resource);
+		if (ret != -EBUSY)
+			return ret;
+		/* resource is busy, check our timeout */
+		if (time_after_eq(jiffies, timeout))
+			return -EBUSY;
+		usleep_range(80, 120);	/* arbitrary delay */
+	}
+}
+
+/*
+ * Release access to a chip resource
+ */
+void release_chip_resource(struct hfi1_devdata *dd, u32 resource)
+{
+	u64 scratch0, bit;
+
+	/* only dynamic resources should ever be cleared */
+	if (!(resource & CR_DYN_MASK)) {
+		dd_dev_err(dd, "%s: invalid resource 0x%x\n", __func__,
+			   resource);
+		return;
+	}
+	bit = resource_mask(dd->hfi1_id, resource);
+
+	/* lock against other callers within the driver wanting a resource */
+	mutex_lock(&dd->asic_data->asic_resource_mutex);
+
+	if (acquire_hw_mutex(dd)) {
+		fail_mutex_acquire_message(dd, __func__);
+		goto done;
+	}
+
+	scratch0 = read_csr(dd, ASIC_CFG_SCRATCH);
+	if ((scratch0 & bit) != 0) {
+		scratch0 &= ~bit;
+		write_csr(dd, ASIC_CFG_SCRATCH, scratch0);
+		/* force write to be visible to other HFI on another OS */
+		(void)read_csr(dd, ASIC_CFG_SCRATCH);
+	} else {
+		dd_dev_warn(dd, "%s: id %d, resource 0x%x: bit not set\n",
+			    __func__, dd->hfi1_id, resource);
+	}
+
+	release_hw_mutex(dd);
+
+done:
+	mutex_unlock(&dd->asic_data->asic_resource_mutex);
+}
+
+/*
+ * Return true if resource is set, false otherwise.  Print a warning
+ * if not set and a function is supplied.
+ */
+bool check_chip_resource(struct hfi1_devdata *dd, u32 resource,
+			 const char *func)
+{
+	u64 scratch0, bit;
+
+	if (resource & CR_DYN_MASK)
+		bit = resource_mask(dd->hfi1_id, resource);
+	else
+		bit = resource;
+
+	scratch0 = read_csr(dd, ASIC_CFG_SCRATCH);
+	if ((scratch0 & bit) == 0) {
+		if (func)
+			dd_dev_warn(dd,
+				    "%s: id %d, resource 0x%x, not acquired!\n",
+				    func, dd->hfi1_id, resource);
+		return false;
+	}
+	return true;
+}
+
+static void clear_chip_resources(struct hfi1_devdata *dd, const char *func)
+{
+	u64 scratch0;
+
+	/* lock against other callers within the driver wanting a resource */
+	mutex_lock(&dd->asic_data->asic_resource_mutex);
+
+	if (acquire_hw_mutex(dd)) {
+		fail_mutex_acquire_message(dd, func);
+		goto done;
+	}
+
+	/* clear all dynamic access bits for this HFI */
+	scratch0 = read_csr(dd, ASIC_CFG_SCRATCH);
+	scratch0 &= ~resource_mask(dd->hfi1_id, CR_DYN_MASK);
+	write_csr(dd, ASIC_CFG_SCRATCH, scratch0);
+	/* force write to be visible to other HFI on another OS */
+	(void)read_csr(dd, ASIC_CFG_SCRATCH);
+
+	release_hw_mutex(dd);
+
+done:
+	mutex_unlock(&dd->asic_data->asic_resource_mutex);
+}
+
+void init_chip_resources(struct hfi1_devdata *dd)
+{
+	/* clear any holds left by us */
+	clear_chip_resources(dd, __func__);
+}
+
+void finish_chip_resources(struct hfi1_devdata *dd)
+{
+	/* clear any holds left by us */
+	clear_chip_resources(dd, __func__);
+}
+
 void set_sbus_fast_mode(struct hfi1_devdata *dd)
 {
 	write_csr(dd, ASIC_CFG_SBUS_EXECUTE,
@@ -1421,7 +1617,7 @@ int load_firmware(struct hfi1_devdata *dd)
 	int ret;
 
 	if (fw_fabric_serdes_load) {
-		ret = acquire_hw_mutex(dd);
+		ret = acquire_chip_resource(dd, CR_SBUS, SBUS_TIMEOUT);
 		if (ret)
 			return ret;
 
@@ -1437,7 +1633,7 @@ int load_firmware(struct hfi1_devdata *dd)
 		} while (retry_firmware(dd, ret));
 
 		clear_sbus_fast_mode(dd);
-		release_hw_mutex(dd);
+		release_chip_resource(dd, CR_SBUS);
 		if (ret)
 			return ret;
 	}
@@ -1817,7 +2013,7 @@ int get_platform_config_field(struct hfi1_devdata *dd,
  * Download the firmware needed for the Gen3 PCIe SerDes.  An update
  * to the SBus firmware is needed before updating the PCIe firmware.
  *
- * Note: caller must be holding the HW mutex.
+ * Note: caller must be holding the SBus resource.
  */
 int load_pcie_firmware(struct hfi1_devdata *dd)
 {

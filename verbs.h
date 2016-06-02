@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -445,6 +442,7 @@ struct hfi1_qp {
 
 	enum ib_mtu path_mtu;
 	int srate_mbps;		/* s_srate (below) converted to Mbit/s */
+	pid_t pid;		/* pid for user QP */
 	u32 remote_qpn;
 	u32 qkey;               /* QKEY for this QP (for UD or RD) */
 	u32 s_size;             /* send work queue size */
@@ -555,6 +553,7 @@ struct hfi1_pkt_state {
 	struct hfi1_ibport *ibp;
 	struct hfi1_pportdata *ppd;
 	struct verbs_txreq *s_txreq;
+	unsigned long flags;
 };
 
 /*
@@ -1195,6 +1194,8 @@ extern unsigned int hfi1_max_srqs;
 extern unsigned int hfi1_max_srq_sges;
 
 extern unsigned int hfi1_max_srq_wrs;
+
+extern unsigned short piothreshold;
 
 extern const u32 ib_hfi1_rnr_table[];
 

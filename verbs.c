@@ -1,11 +1,10 @@
 /*
+ * Copyright(c) 2015, 2016 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
  * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -17,8 +16,6 @@
  * General Public License for more details.
  *
  * BSD LICENSE
- *
- * Copyright(c) 2015 Intel Corporation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -55,7 +52,6 @@
 #include <linux/utsname.h>
 #include <linux/rculist.h>
 #include <linux/mm.h>
-#include <linux/random.h>
 #include <linux/vmalloc.h>
 #include <linux/log2.h>
 
@@ -125,7 +121,7 @@ unsigned int hfi1_max_srq_wrs = 0x1FFFF;
 module_param_named(max_srq_wrs, hfi1_max_srq_wrs, uint, S_IRUGO);
 MODULE_PARM_DESC(max_srq_wrs, "Maximum number of SRQ WRs support");
 
-static unsigned short piothreshold = 256;
+unsigned short piothreshold = 256;
 module_param(piothreshold, ushort, S_IRUGO);
 MODULE_PARM_DESC(piothreshold, "size used to determine sdma vs. pio");
 
@@ -1210,11 +1206,15 @@ int hfi1_verbs_send_dma(struct hfi1_qp *qp, struct hfi1_pkt_state *ps,
 		if (unlikely(ret))
 			goto bail_build;
 	}
-	trace_output_ibhdr(dd_from_ibdev(qp->ibqp.device),
-			   &ps->s_txreq->phdr.hdr);
 	ret =  sdma_send_txreq(tx->sde, &qp->s_iowait, &tx->txreq);
-	if (unlikely(ret == -ECOMM))
-		goto bail_ecomm;
+	if (unlikely(ret < 0)) {
+		if (ret == -ECOMM)
+			goto bail_ecomm;
+		return ret;
+	}
+	trace_sdma_output_ibhdr(
+		dd_from_ibdev(qp->ibqp.device),
+		&ps->s_txreq->phdr.hdr);
 	return ret;
 
 bail_ecomm:
@@ -1375,8 +1375,8 @@ int hfi1_verbs_send_pio(struct hfi1_qp *qp, struct hfi1_pkt_state *ps,
 		}
 	}
 
-	trace_output_ibhdr(dd_from_ibdev(qp->ibqp.device),
-			   &ps->s_txreq->phdr.hdr);
+	trace_pio_output_ibhdr(dd_from_ibdev(qp->ibqp.device),
+			       &ps->s_txreq->phdr.hdr);
 
 pio_bail:
 	if (qp->s_wqe) {
@@ -1398,16 +1398,16 @@ bail:
 
 /*
  * egress_pkey_matches_entry - return 1 if the pkey matches ent (ent
- * being an entry from the ingress partition key table), return 0
+ * being an entry from the partition key table), return 0
  * otherwise. Use the matching criteria for egress partition keys
  * specified in the OPAv1 spec., section 9.1l.7.
  */
 static inline int egress_pkey_matches_entry(u16 pkey, u16 ent)
 {
 	u16 mkey = pkey & PKEY_LOW_15_MASK;
-	u16 ment = ent & PKEY_LOW_15_MASK;
+	u16 mentry = ent & PKEY_LOW_15_MASK;
 
-	if (mkey == ment) {
+	if (mkey == mentry) {
 		/*
 		 * If pkey[15] is set (full partition member),
 		 * is bit 15 in the corresponding table element
@@ -1420,31 +1420,32 @@ static inline int egress_pkey_matches_entry(u16 pkey, u16 ent)
 	return 0;
 }
 
-/*
- * egress_pkey_check - return 0 if hdr's pkey matches according to the
- * criteria in the OPAv1 spec., section 9.11.7.
+/**
+ * egress_pkey_check - check P_KEY of a packet
+ * @ppd:    Physical IB port data
+ * @lrh: Local route header
+ * @bth: Base transport header
+ * @sc5:    SC for packet
+ * @s_pkey_index: It will be used for look up optimization for kernel contexts
+ * only. If it is negative value, then it means user contexts is calling this
+ * function.
+ *
+ * It checks if hdr's pkey is valid.
+ *
+ * Return: 0 on success, otherwise, 1
  */
-static inline int egress_pkey_check(struct hfi1_pportdata *ppd,
-				    struct hfi1_ib_header *hdr,
-				    struct hfi1_qp *qp)
+int egress_pkey_check(struct hfi1_pportdata *ppd, __be16 *lrh, __be32 *bth,
+		      u8 sc5, int8_t s_pkey_index)
 {
-	struct hfi1_other_headers *ohdr;
 	struct hfi1_devdata *dd;
-	int i = 0;
+	int i;
 	u16 pkey;
-	u8 lnh, sc5 = qp->s_sc;
+	int is_user_ctxt_mechanism = (s_pkey_index < 0);
 
 	if (!(ppd->part_enforce & HFI1_PART_ENFORCE_OUT))
 		return 0;
 
-	/* locate the pkey within the headers */
-	lnh = be16_to_cpu(hdr->lrh[0]) & 3;
-	if (lnh == HFI1_LRH_GRH)
-		ohdr = &hdr->u.l.oth;
-	else
-		ohdr = &hdr->u.oth;
-
-	pkey = (u16)be32_to_cpu(ohdr->bth[0]);
+	pkey = (u16)be32_to_cpu(bth[0]);
 
 	/* If SC15, pkey[0:14] must be 0x7fff */
 	if ((sc5 == 0xf) && ((pkey & PKEY_LOW_15_MASK) != PKEY_LOW_15_MASK))
@@ -1454,28 +1455,37 @@ static inline int egress_pkey_check(struct hfi1_pportdata *ppd,
 	if ((pkey & PKEY_LOW_15_MASK) == 0)
 		goto bad;
 
-	/* The most likely matching pkey has index qp->s_pkey_index */
-	if (unlikely(!egress_pkey_matches_entry(pkey,
-						ppd->pkeys
-						[qp->s_pkey_index]))) {
-		/* no match - try the entire table */
-		for (; i < MAX_PKEY_VALUES; i++) {
-			if (egress_pkey_matches_entry(pkey, ppd->pkeys[i]))
-				break;
-		}
+	/*
+	 * For the kernel contexts only, if a qp is passed into the function,
+	 * the most likely matching pkey has index qp->s_pkey_index
+	 */
+	if (!is_user_ctxt_mechanism &&
+	    egress_pkey_matches_entry(pkey, ppd->pkeys[s_pkey_index])) {
+		return 0;
 	}
 
-	if (i < MAX_PKEY_VALUES)
-		return 0;
+	for (i = 0; i < MAX_PKEY_VALUES; i++) {
+		if (egress_pkey_matches_entry(pkey, ppd->pkeys[i]))
+			return 0;
+	}
 bad:
-	incr_cntr64(&ppd->port_xmit_constraint_errors);
-	dd = ppd->dd;
-	if (!(dd->err_info_xmit_constraint.status & OPA_EI_STATUS_SMASK)) {
-		u16 slid = be16_to_cpu(hdr->lrh[3]);
+	/*
+	 * For the user-context mechanism, the P_KEY check would only happen
+	 * once per SDMA request, not once per packet.  Therefore, there's no
+	 * need to increment the counter for the user-context mechanism.
+	 */
+	if (!is_user_ctxt_mechanism) {
+		incr_cntr64(&ppd->port_xmit_constraint_errors);
+		dd = ppd->dd;
+		if (!(dd->err_info_xmit_constraint.status &
+		      OPA_EI_STATUS_SMASK)) {
+			u16 slid = be16_to_cpu(lrh[3]);
 
-		dd->err_info_xmit_constraint.status |= OPA_EI_STATUS_SMASK;
-		dd->err_info_xmit_constraint.slid = slid;
-		dd->err_info_xmit_constraint.pkey = pkey;
+			dd->err_info_xmit_constraint.status |=
+				OPA_EI_STATUS_SMASK;
+			dd->err_info_xmit_constraint.slid = slid;
+			dd->err_info_xmit_constraint.pkey = pkey;
+		}
 	}
 	return 1;
 }
@@ -1532,11 +1542,26 @@ static inline send_routine get_send_routine(struct hfi1_qp *qp,
 int hfi1_verbs_send(struct hfi1_qp *qp, struct hfi1_pkt_state *ps)
 {
 	struct hfi1_devdata *dd = dd_from_ibdev(qp->ibqp.device);
+	struct hfi1_other_headers *ohdr;
+	struct hfi1_ib_header *hdr;
 	send_routine sr;
 	int ret;
+	u8 lnh;
+
+	hdr = &ps->s_txreq->phdr.hdr;
+	/* locate the pkey within the headers */
+	lnh = be16_to_cpu(hdr->lrh[0]) & 3;
+	if (lnh == HFI1_LRH_GRH)
+		ohdr = &hdr->u.l.oth;
+	else
+		ohdr = &hdr->u.oth;
 
 	sr = get_send_routine(qp, ps->s_txreq);
-	ret = egress_pkey_check(dd->pport, &ps->s_txreq->phdr.hdr, qp);
+	ret = egress_pkey_check(dd->pport,
+				hdr->lrh,
+				ohdr->bth,
+				qp->s_sc,
+				qp->s_pkey_index);
 	if (unlikely(ret)) {
 		/*
 		 * The value we are returning here does not get propagated to
@@ -2141,13 +2166,13 @@ int hfi1_register_ib_device(struct hfi1_devdata *dd)
 	 * the LKEY).  The remaining bits act as a generation number or tag.
 	 */
 	spin_lock_init(&dev->lk_table.lock);
-	dev->lk_table.max = 1 << hfi1_lkey_table_size;
 	/* ensure generation is at least 4 bits (keys.c) */
 	if (hfi1_lkey_table_size > MAX_LKEY_TABLE_BITS) {
 		dd_dev_warn(dd, "lkey bits %u too large, reduced to %u\n",
 			    hfi1_lkey_table_size, MAX_LKEY_TABLE_BITS);
 		hfi1_lkey_table_size = MAX_LKEY_TABLE_BITS;
 	}
+	dev->lk_table.max = 1 << hfi1_lkey_table_size;
 	lk_tab_size = dev->lk_table.max * sizeof(*dev->lk_table.table);
 	dev->lk_table.table = (struct hfi1_mregion __rcu **)
 		vmalloc_node(lk_tab_size, dd->node);
