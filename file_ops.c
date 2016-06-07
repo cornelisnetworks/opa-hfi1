@@ -278,6 +278,9 @@ static ssize_t hfi1_file_write(struct file *fp, const char __user *data,
 
 	switch (cmd.type) {
 	case HFI1_CMD_ASSIGN_CTXT:
+		if (uctxt)
+			return -EINVAL;
+
 		ret = assign_ctxt(fp, &uinfo);
 		if (ret < 0)
 			goto bail;
