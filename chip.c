@@ -14160,7 +14160,12 @@ static int init_asic_data(struct hfi1_devdata *dd)
 {
 	unsigned long flags;
 	struct hfi1_devdata *tmp, *peer = NULL;
-	int ret = 0;
+	struct hfi1_asic_data *asic_data;
+
+	/* pre-allocate the asic structure in case we are the first device */
+	asic_data = kzalloc(sizeof(*dd->asic_data), GFP_KERNEL);
+	if (!asic_data)
+		return -ENOMEM;
 
 	spin_lock_irqsave(&hfi1_devs_lock, flags);
 	/* Find our peer device */
@@ -14173,20 +14178,16 @@ static int init_asic_data(struct hfi1_devdata *dd)
 	}
 
 	if (peer) {
+		/* use already allocated structure */
 		dd->asic_data = peer->asic_data;
+		kfree(asic_data);
 	} else {
-		dd->asic_data = kzalloc(sizeof(*dd->asic_data), GFP_KERNEL);
-		if (!dd->asic_data) {
-			ret = -ENOMEM;
-			goto done;
-		}
+		dd->asic_data = asic_data;
 		mutex_init(&dd->asic_data->asic_resource_mutex);
 	}
 	dd->asic_data->dds[dd->hfi1_id] = dd; /* self back-pointer */
-
-done:
 	spin_unlock_irqrestore(&hfi1_devs_lock, flags);
-	return ret;
+	return 0;
 }
 
 /*
