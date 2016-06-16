@@ -81,6 +81,12 @@ module_param(mem_affinity, uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mem_affinity,
 		 "Bitmask for memory affinity control: 0 - device, 1 - process");
 
+static char sdma_affinity[1024];
+module_param_string(sdma_affinity, sdma_affinity, sizeof(sdma_affinity),
+		    S_IRUGO);
+MODULE_PARM_DESC(sdma_affinity,
+		 "Comma separated CPU core numbers or ranges for overriding SDMA interrupt affinity");
+
 static inline void init_cpu_mask_set(struct cpu_mask_set *set)
 {
 	cpumask_clear(&set->mask);
@@ -235,6 +241,8 @@ int hfi1_dev_affinity_init(struct hfi1_devdata *dd)
 	struct hfi1_affinity_node *entry;
 	const struct cpumask *local_mask;
 	int curr_cpu, possible, i;
+	cpumask_var_t sdma_mask;
+	int ret;
 
 	if (node < 0)
 		node = numa_node_id();
@@ -311,6 +319,35 @@ int hfi1_dev_affinity_init(struct hfi1_devdata *dd)
 			if (cpumask_weight(&entry->def_intr.mask) == 0)
 				cpumask_copy(&entry->def_intr.mask,
 					     &entry->general_intr_mask);
+		}
+
+		if (sdma_affinity[0] != '\0') {
+			ret = zalloc_cpumask_var(&sdma_mask, GFP_KERNEL);
+			if (!ret) {
+				kfree(entry);
+				dd_dev_err(dd,
+					   "Unable to allocate SDMA mask\n");
+				return -ENOMEM;
+			}
+			ret = cpumask_parselist_user((const char __user *)
+						     sdma_affinity,
+						     sizeof(sdma_affinity),
+						     sdma_mask);
+			if (ret != 0) {
+				kfree(entry);
+				free_cpumask_var(sdma_mask);
+				dd_dev_warn(dd, "Invalid sdma_affinity module parameter\n");
+				return -EINVAL;
+			}
+			if (!cpumask_subset(sdma_mask, cpu_online_mask)) {
+				kfree(entry);
+				free_cpumask_var(sdma_mask);
+				dd_dev_warn(dd, "There are invalid CPU cores in the module parameter sdma_affinity\n");
+				return -EINVAL;
+			}
+
+			cpumask_copy(&entry->def_intr.mask, sdma_mask);
+			free_cpumask_var(sdma_mask);
 		}
 
 		spin_lock(&node_affinity.lock);
