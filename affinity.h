@@ -123,6 +123,7 @@ struct hfi1_affinity_node {
 	int node;
 	struct cpu_mask_set def_intr;
 	struct cpu_mask_set rcv_intr;
+	struct cpumask general_intr_mask;
 	struct list_head list;
 };
 
@@ -134,7 +135,7 @@ struct hfi1_affinity_node_list {
 	spinlock_t lock;
 };
 
-void node_affinity_init(void);
+int node_affinity_init(void);
 void node_affinity_destroy(void);
 extern struct hfi1_affinity_node_list node_affinity;
 
