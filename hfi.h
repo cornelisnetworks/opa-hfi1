@@ -1155,7 +1155,6 @@ struct hfi1_devdata {
 	/* Save the enabled LCB error bits */
 	u64 lcb_err_en;
 	u8 dc_shutdown;
-	struct hfi1_affinity *affinity;
 
 	/* receive context tail dummy address */
 	__le64 *rcvhdrtail_dummy_kvaddr;

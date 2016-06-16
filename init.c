@@ -63,6 +63,7 @@
 #include "debugfs.h"
 #include "verbs.h"
 #include "aspm.h"
+#include "affinity.h"
 
 #undef pr_fmt
 #define pr_fmt(fmt) DRIVER_NAME ": " fmt
@@ -1010,7 +1011,6 @@ void hfi1_free_devdata(struct hfi1_devdata *dd)
 	free_percpu(dd->int_counter);
 	free_percpu(dd->rcv_limit);
 	free_percpu(dd->send_schedule);
-	hfi1_dev_affinity_free(dd);
 	ib_dealloc_device(&dd->verbs_dev.ibdev);
 }
 
@@ -1190,6 +1190,8 @@ static int __init hfi1_mod_init(void)
 	if (ret)
 		goto bail;
 
+	node_affinity_init();
+
 	/* validate max MTU before any devices start */
 	if (!valid_opa_max_mtu(hfi1_max_mtu)) {
 		pr_err("Invalid max_mtu 0x%x, using 0x%x instead\n",
@@ -1270,6 +1272,7 @@ module_init(hfi1_mod_init);
 static void __exit hfi1_mod_cleanup(void)
 {
 	pci_unregister_driver(&hfi1_pci_driver);
+	node_affinity_destroy();
 	hfi1_wss_exit();
 	hfi1_dbg_exit();
 	hfi1_cpulist_count = 0;
