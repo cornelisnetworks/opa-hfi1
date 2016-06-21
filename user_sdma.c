@@ -308,7 +308,7 @@ static void activate_packet_queue(struct iowait *, int);
 static bool sdma_rb_filter(struct mmu_rb_node *, unsigned long, unsigned long);
 static int sdma_rb_insert(void *, struct mmu_rb_node *);
 static void sdma_rb_remove(void *, struct mmu_rb_node *,
-			   struct mm_struct *);
+			   struct mm_struct *, bool in_notifier);
 static int sdma_rb_invalidate(void *, struct mmu_rb_node *);
 
 static struct mmu_rb_ops sdma_rb_ops = {
@@ -1642,7 +1642,7 @@ static int sdma_rb_insert(void *arg, struct mmu_rb_node *mnode)
 }
 
 static void sdma_rb_remove(void *arg, struct mmu_rb_node *mnode,
-			   struct mm_struct *mm)
+			   struct mm_struct *mm, bool in_notifier)
 {
 	struct sdma_mmu_node *node =
 		container_of(mnode, struct sdma_mmu_node, rb);
@@ -1655,7 +1655,7 @@ static void sdma_rb_remove(void *arg, struct mmu_rb_node *mnode,
 	 * We have to take the above lock first because we are racing
 	 * against the setting of the bit in the eviction function.
 	 */
-	if (mm && test_bit(SDMA_CACHE_NODE_EVICT, &node->flags)) {
+	if (in_notifier && test_bit(SDMA_CACHE_NODE_EVICT, &node->flags)) {
 		spin_unlock(&node->pq->evict_lock);
 		return;
 	}
@@ -1666,19 +1666,14 @@ static void sdma_rb_remove(void *arg, struct mmu_rb_node *mnode,
 	spin_unlock(&node->pq->evict_lock);
 
 	/*
-	 * If mm is set, we are being called by the MMU notifier and we
-	 * should not pass a mm_struct to unpin_vector_page(). This is to
+	 * We should not pass a mm_struct to unpin_vector_page(). This is to
 	 * prevent a deadlock when hfi1_release_user_pages() attempts to
-	 * take the mmap_sem, which the MMU notifier has already taken.
+	 * take the mmap_sem, which our caller has already taken.  Instead,
+	 * we have to adjust the pinned page count ourselves.
 	 */
-	unpin_vector_pages(mm ? NULL : current->mm, node->pages, 0,
-			   node->npages);
-	/*
-	 * If called by the MMU notifier, we have to adjust the pinned
-	 * page count ourselves.
-	 */
-	if (mm)
-		mm->pinned_vm -= node->npages;
+	unpin_vector_pages(NULL, node->pages, 0, node->npages);
+	mm->pinned_vm -= node->npages;
+
 	kfree(node);
 }
 

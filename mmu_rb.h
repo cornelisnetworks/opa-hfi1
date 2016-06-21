@@ -61,7 +61,7 @@ struct mmu_rb_ops {
 		       unsigned long len);
 	int (*insert)(void *ops_arg, struct mmu_rb_node *mnode);
 	void (*remove)(void *ops_arg, struct mmu_rb_node *mnode,
-		       struct mm_struct *mm);
+		       struct mm_struct *mm, bool in_notifier);
 	int (*invalidate)(void *ops_arg, struct mmu_rb_node *node);
 };
 

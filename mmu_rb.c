@@ -128,6 +128,7 @@ void hfi1_mmu_rb_unregister(struct mmu_rb_handler *handler)
 	/* Unregister first so we don't get any more notifications. */
 	mmu_notifier_unregister(&handler->mn, handler->mm);
 
+	down_write(&handler->mm->mmap_sem);
 	spin_lock_irqsave(&handler->lock, flags);
 	if (!RB_EMPTY_ROOT(&handler->root)) {
 		struct rb_node *node;
@@ -137,10 +138,11 @@ void hfi1_mmu_rb_unregister(struct mmu_rb_handler *handler)
 			rbnode = rb_entry(node, struct mmu_rb_node, node);
 			rb_erase(node, &handler->root);
 			handler->ops->remove(handler->ops_arg, rbnode,
-					     NULL);
+					     handler->mm, false);
 		}
 	}
 	spin_unlock_irqrestore(&handler->lock, flags);
+	up_write(&handler->mm->mmap_sem);
 
 	kfree(handler);
 }
@@ -221,7 +223,9 @@ void hfi1_mmu_rb_remove(struct mmu_rb_handler *handler,
 	__mmu_int_rb_remove(node, &handler->root);
 	spin_unlock_irqrestore(&handler->lock, flags);
 
-	handler->ops->remove(handler->ops_arg, node, NULL);
+	down_write(&handler->mm->mmap_sem);
+	handler->ops->remove(handler->ops_arg, node, handler->mm, false);
+	up_write(&handler->mm->mmap_sem);
 }
 
 static inline void mmu_notifier_page(struct mmu_notifier *mn,
@@ -257,7 +261,8 @@ static void mmu_notifier_mem_invalidate(struct mmu_notifier *mn,
 			  node->addr, node->len);
 		if (handler->ops->invalidate(handler->ops_arg, node)) {
 			__mmu_int_rb_remove(node, root);
-			handler->ops->remove(handler->ops_arg, node, mm);
+			/* NOTE: mmu notifier code holds mmap_sem for us */
+			handler->ops->remove(handler->ops_arg, node, mm, true);
 		}
 	}
 	spin_unlock_irqrestore(&handler->lock, flags);

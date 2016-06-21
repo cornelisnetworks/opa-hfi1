@@ -88,7 +88,7 @@ static int set_rcvarray_entry(struct file *, unsigned long, u32,
 			      struct tid_group *, struct page **, unsigned);
 static int mmu_rb_insert(void *, struct mmu_rb_node *);
 static void mmu_rb_remove(void *, struct mmu_rb_node *,
-			  struct mm_struct *);
+			  struct mm_struct *, bool in_notifier);
 static int mmu_rb_invalidate(void *, struct mmu_rb_node *);
 static int program_rcvarray(struct file *, unsigned long, struct tid_group *,
 			    struct tid_pageset *, unsigned, u16, struct page **,
@@ -874,7 +874,7 @@ static int unprogram_rcvarray(struct file *fp, u32 tidinfo,
 	if (!node || node->rcventry != (uctxt->expected_base + rcventry))
 		return -EBADF;
 	if (!fd->handler)
-		mmu_rb_remove(fd, &node->mmu, fd->mm);
+		mmu_rb_remove(fd, &node->mmu, fd->mm, false);
 	else
 		hfi1_mmu_rb_remove(fd->handler, &node->mmu);
 
@@ -937,7 +937,8 @@ static void unlock_exp_tids(struct hfi1_ctxtdata *uctxt,
 				if (!node || node->rcventry != rcventry)
 					continue;
 				if (!fd->handler)
-					mmu_rb_remove(fd, &node->mmu, fd->mm);
+					mmu_rb_remove(fd, &node->mmu, fd->mm,
+						      false);
 				else
 					hfi1_mmu_rb_remove(fd->handler,
 							   &node->mmu);
@@ -1002,7 +1003,7 @@ static int mmu_rb_insert(void *arg, struct mmu_rb_node *node)
 }
 
 static void mmu_rb_remove(void *arg, struct mmu_rb_node *node,
-			  struct mm_struct *mm)
+			  struct mm_struct *mm, bool in_notifier)
 {
 	struct hfi1_filedata *fdata = arg;
 	struct tid_rb_node *tnode =
