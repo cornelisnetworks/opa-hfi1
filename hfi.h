@@ -455,9 +455,9 @@ struct hfi1_sge_state;
 #define HLS_DOWN ~(HLS_UP)
 
 /* use this MTU size if none other is given */
-#define HFI1_DEFAULT_ACTIVE_MTU 10240
+#define HFI1_DEFAULT_ACTIVE_MTU 8192
 /* use this MTU size as the default maximum */
-#define HFI1_DEFAULT_MAX_MTU 10240
+#define HFI1_DEFAULT_MAX_MTU 8192
 /* default partition key */
 #define DEFAULT_PKEY 0xffff
 
