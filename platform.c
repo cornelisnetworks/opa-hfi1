@@ -611,7 +611,6 @@ static int tune_active_qsfp(struct hfi1_pportdata *ppd, u32 *ptr_tx_preset,
 
 	if (ppd->qsfp_info.reset_needed) {
 		reset_qsfp(ppd);
-		ppd->qsfp_info.reset_needed = 0;
 		refresh_qsfp_cache(ppd, &ppd->qsfp_info);
 	} else {
 		ppd->qsfp_info.reset_needed = 1;
