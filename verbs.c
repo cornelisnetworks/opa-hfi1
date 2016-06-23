@@ -842,19 +842,15 @@ bail:
 /*
  * Make sure the QP is ready and able to accept the given opcode.
  */
-static inline int qp_ok(int opcode, struct hfi1_packet *packet)
+static inline opcode_handler qp_ok(int opcode, struct hfi1_packet *packet)
 {
-	struct hfi1_ibport *ibp;
-
 	if (!(ib_hfi1_state_ops[packet->qp->state] & HFI1_PROCESS_RECV_OK))
-		goto dropit;
+		return NULL;
 	if (((opcode & OPCODE_QP_MASK) == packet->qp->allowed_ops) ||
 	    (opcode == IB_OPCODE_CNP))
-		return 1;
-dropit:
-	ibp = &packet->rcd->ppd->ibport_data;
-	ibp->n_pkt_drops++;
-	return 0;
+		return opcode_handler_tbl[opcode];
+
+	return NULL;
 }
 
 /**
@@ -872,6 +868,7 @@ void hfi1_ib_rcv(struct hfi1_packet *packet)
 	u32 tlen = packet->tlen;
 	struct hfi1_pportdata *ppd = rcd->ppd;
 	struct hfi1_ibport *ibp = &ppd->ibport_data;
+	opcode_handler packet_handler;
 	unsigned long flags;
 	u32 qp_num;
 	int lnh;
@@ -918,8 +915,11 @@ void hfi1_ib_rcv(struct hfi1_packet *packet)
 		list_for_each_entry_rcu(p, &mcast->qp_list, list) {
 			packet->qp = p->qp;
 			spin_lock_irqsave(&packet->qp->r_lock, flags);
-			if (likely((qp_ok(opcode, packet))))
-				opcode_handler_tbl[opcode](packet);
+			packet_handler = qp_ok(opcode, packet);
+			if (likely(packet_handler))
+				packet_handler(packet);
+			else
+				ibp->n_pkt_drops++;
 			spin_unlock_irqrestore(&packet->qp->r_lock, flags);
 		}
 		/*
@@ -936,8 +936,11 @@ void hfi1_ib_rcv(struct hfi1_packet *packet)
 			goto drop;
 		}
 		spin_lock_irqsave(&packet->qp->r_lock, flags);
-		if (likely((qp_ok(opcode, packet))))
-			opcode_handler_tbl[opcode](packet);
+		packet_handler = qp_ok(opcode, packet);
+		if (likely(packet_handler))
+			packet_handler(packet);
+		else
+			ibp->n_pkt_drops++;
 		spin_unlock_irqrestore(&packet->qp->r_lock, flags);
 		rcu_read_unlock();
 	}
