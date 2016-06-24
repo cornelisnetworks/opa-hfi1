@@ -315,8 +315,8 @@ static void hfi1_snoop_remove(struct hfi1_devdata *dd)
 
 	spin_lock_irqsave(&dd->hfi1_snoop.snoop_lock, flags);
 	drain_snoop_list(&dd->hfi1_snoop.queue);
-	hfi1_cdev_cleanup(&dd->hfi1_snoop.cdev, &dd->hfi1_snoop.class_dev);
 	spin_unlock_irqrestore(&dd->hfi1_snoop.snoop_lock, flags);
+	hfi1_cdev_cleanup(&dd->hfi1_snoop.cdev, &dd->hfi1_snoop.class_dev);
 }
 
 void hfi1_diag_remove(struct hfi1_devdata *dd)
