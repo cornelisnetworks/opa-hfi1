@@ -9222,11 +9222,12 @@ static void wait_for_qsfp_init(struct hfi1_pportdata *ppd)
 	unsigned long timeout;
 
 	/*
-	 * Some QSFP cables have a quirk that asserts the IntN line as a side effect of
-	 * power up on plug-in. We ignore this false positive interrupt until the module
-	 * has finished powering up by waiting for a minimum timeout of the module
-	 * inrush initialization time of 500 ms (SFF 8679 Table 5-6) to ensure
-	 * the voltage rails in the module have stabilized.
+	 * Some QSFP cables have a quirk that asserts the IntN line as a side
+	 * effect of power up on plug-in. We ignore this false positive
+	 * interrupt until the module has finished powering up by waiting for
+	 * a minimum timeout of the module inrush initialization time of
+	 * 500 ms (SFF 8679 Table 5-6) to ensure the voltage rails in the
+	 * module have stabilized.
 	 */
 	msleep(500);
 
