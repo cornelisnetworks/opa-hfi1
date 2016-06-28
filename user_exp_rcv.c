@@ -154,16 +154,16 @@ static inline void tid_group_move(struct tid_group *group,
  */
 int hfi1_user_exp_rcv_init(struct file *fp)
 {
-	struct hfi1_filedata *fdata = fp->private_data;
-	struct hfi1_ctxtdata *uctxt = fdata->uctxt;
+	struct hfi1_filedata *fd = fp->private_data;
+	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	struct hfi1_devdata *dd = uctxt->dd;
 	unsigned tidbase;
 	int i, ret = 0;
 
-	spin_lock_init(&fdata->invalid_lock);
-	fdata->tid_rb_root = RB_ROOT;
+	spin_lock_init(&fd->invalid_lock);
+	fd->tid_rb_root = RB_ROOT;
 
-	if (!uctxt->subctxt_cnt || !fdata->subctxt) {
+	if (!uctxt->subctxt_cnt || !fd->subctxt) {
 		exp_tid_group_init(&uctxt->tid_group_list);
 		exp_tid_group_init(&uctxt->tid_used_list);
 		exp_tid_group_init(&uctxt->tid_full_list);
@@ -190,17 +190,17 @@ int hfi1_user_exp_rcv_init(struct file *fp)
 		}
 	}
 
-	fdata->entry_to_rb = kcalloc(uctxt->expected_count,
+	fd->entry_to_rb = kcalloc(uctxt->expected_count,
 				     sizeof(struct rb_node *),
 				     GFP_KERNEL);
-	if (!fdata->entry_to_rb)
+	if (!fd->entry_to_rb)
 		return -ENOMEM;
 
 	if (!HFI1_CAP_IS_USET(TID_UNMAP)) {
-		fdata->invalid_tid_idx = 0;
-		fdata->invalid_tids = kzalloc(uctxt->expected_count *
+		fd->invalid_tid_idx = 0;
+		fd->invalid_tids = kzalloc(uctxt->expected_count *
 					   sizeof(u32), GFP_KERNEL);
-		if (!fdata->invalid_tids) {
+		if (!fd->invalid_tids) {
 			ret = -ENOMEM;
 			goto done;
 		}
@@ -210,7 +210,7 @@ int hfi1_user_exp_rcv_init(struct file *fp)
 		 * fails, continue but turn off the TID caching for
 		 * all user contexts.
 		 */
-		ret = hfi1_mmu_rb_register(&fdata->tid_rb_root, &tid_rb_ops);
+		ret = hfi1_mmu_rb_register(&fd->tid_rb_root, &tid_rb_ops);
 		if (ret) {
 			dd_dev_info(dd,
 				    "Failed MMU notifier registration %d\n",
@@ -236,20 +236,20 @@ int hfi1_user_exp_rcv_init(struct file *fp)
 	if (uctxt->subctxt_cnt && !HFI1_CAP_IS_USET(TID_UNMAP)) {
 		u16 remainder;
 
-		fdata->tid_limit = uctxt->expected_count / uctxt->subctxt_cnt;
+		fd->tid_limit = uctxt->expected_count / uctxt->subctxt_cnt;
 		remainder = uctxt->expected_count % uctxt->subctxt_cnt;
-		if (remainder && (fdata->subctxt) < remainder)
-			fdata->tid_limit++;
+		if (remainder && (fd->subctxt) < remainder)
+			fd->tid_limit++;
 	} else {
-		fdata->tid_limit = uctxt->expected_count;
+		fd->tid_limit = uctxt->expected_count;
 	}
 done:
 	return ret;
 }
 
-int hfi1_user_exp_rcv_free(struct hfi1_filedata *fdata)
+int hfi1_user_exp_rcv_free(struct hfi1_filedata *fd)
 {
-	struct hfi1_ctxtdata *uctxt = fdata->uctxt;
+	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	struct tid_group *grp, *gptr;
 
 	if (!test_bit(HFI1_CTXT_SETUP_DONE, &uctxt->event_flags))
@@ -259,17 +259,17 @@ int hfi1_user_exp_rcv_free(struct hfi1_filedata *fdata)
 	 * was freed.
 	 */
 	if (!HFI1_CAP_IS_USET(TID_UNMAP))
-		hfi1_mmu_rb_unregister(&fdata->tid_rb_root);
+		hfi1_mmu_rb_unregister(&fd->tid_rb_root);
 
-	kfree(fdata->invalid_tids);
+	kfree(fd->invalid_tids);
 
 	if (!uctxt->cnt) {
 		if (!EXP_TID_SET_EMPTY(uctxt->tid_full_list))
 			unlock_exp_tids(uctxt, &uctxt->tid_full_list,
-					&fdata->tid_rb_root);
+					&fd->tid_rb_root);
 		if (!EXP_TID_SET_EMPTY(uctxt->tid_used_list))
 			unlock_exp_tids(uctxt, &uctxt->tid_used_list,
-					&fdata->tid_rb_root);
+					&fd->tid_rb_root);
 		list_for_each_entry_safe(grp, gptr, &uctxt->tid_group_list.list,
 					 list) {
 			list_del_init(&grp->list);
@@ -278,7 +278,7 @@ int hfi1_user_exp_rcv_free(struct hfi1_filedata *fdata)
 		hfi1_clear_tids(uctxt);
 	}
 
-	kfree(fdata->entry_to_rb);
+	kfree(fd->entry_to_rb);
 	return 0;
 }
 
@@ -350,8 +350,8 @@ static inline void rcv_array_wc_fill(struct hfi1_devdata *dd, u32 index)
 int hfi1_user_exp_rcv_setup(struct file *fp, struct hfi1_tid_info *tinfo)
 {
 	int ret = 0, need_group = 0, pinned;
-	struct hfi1_filedata *fdata = fp->private_data;
-	struct hfi1_ctxtdata *uctxt = fdata->uctxt;
+	struct hfi1_filedata *fd = fp->private_data;
+	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	struct hfi1_devdata *dd = uctxt->dd;
 	unsigned npages, ngroups, pageidx = 0, pageset_count, npagesets,
 		tididx = 0, mapped, mapped_pages = 0;
@@ -401,7 +401,7 @@ int hfi1_user_exp_rcv_setup(struct file *fp, struct hfi1_tid_info *tinfo)
 	 * pages, accept the amount pinned so far and program only that.
 	 * User space knows how to deal with partially programmed buffers.
 	 */
-	if (!hfi1_can_pin_pages(dd, fdata->tid_n_pinned, npages)) {
+	if (!hfi1_can_pin_pages(dd, fd->tid_n_pinned, npages)) {
 		ret = -ENOMEM;
 		goto bail;
 	}
@@ -411,7 +411,7 @@ int hfi1_user_exp_rcv_setup(struct file *fp, struct hfi1_tid_info *tinfo)
 		ret = pinned;
 		goto bail;
 	}
-	fdata->tid_n_pinned += npages;
+	fd->tid_n_pinned += npages;
 
 	/* Find sets of physically contiguous pages */
 	npagesets = find_phys_blocks(pages, pinned, pagesets);
@@ -421,9 +421,9 @@ int hfi1_user_exp_rcv_setup(struct file *fp, struct hfi1_tid_info *tinfo)
 	 * process and the same process cannot be in hfi1_user_exp_rcv_clear()
 	 * and hfi1_user_exp_rcv_setup() at the same time.
 	 */
-	if (fdata->tid_used + npagesets > fdata->tid_limit)
+	if (fd->tid_used + npagesets > fd->tid_limit)
 
-		pageset_count = fdata->tid_limit - fdata->tid_used;
+		pageset_count = fd->tid_limit - fd->tid_used;
 	else
 		pageset_count = npagesets;
 
@@ -535,7 +535,7 @@ nomem:
 	hfi1_cdbg(TID, "total mapped: tidpairs:%u pages:%u (%d)", tididx,
 		  mapped_pages, ret);
 	if (tididx) {
-		fdata->tid_used += tididx;
+		fd->tid_used += tididx;
 		tinfo->tidcnt = tididx;
 		tinfo->length = mapped_pages * PAGE_SIZE;
 
@@ -561,7 +561,7 @@ nomem:
 		hfi1_release_user_pages(current->mm, &pages[mapped_pages],
 					pinned - mapped_pages,
 					false);
-		fdata->tid_n_pinned -= pinned - mapped_pages;
+		fd->tid_n_pinned -= pinned - mapped_pages;
 	}
 bail:
 	kfree(pagesets);
@@ -573,8 +573,8 @@ bail:
 int hfi1_user_exp_rcv_clear(struct file *fp, struct hfi1_tid_info *tinfo)
 {
 	int ret = 0;
-	struct hfi1_filedata *fdata = fp->private_data;
-	struct hfi1_ctxtdata *uctxt = fdata->uctxt;
+	struct hfi1_filedata *fd = fp->private_data;
+	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	u32 *tidinfo;
 	unsigned tididx;
 
@@ -598,7 +598,7 @@ int hfi1_user_exp_rcv_clear(struct file *fp, struct hfi1_tid_info *tinfo)
 			break;
 		}
 	}
-	fdata->tid_used -= tididx;
+	fd->tid_used -= tididx;
 	tinfo->tidcnt = tididx;
 	mutex_unlock(&uctxt->exp_lock);
 done:
@@ -608,15 +608,15 @@ done:
 
 int hfi1_user_exp_rcv_invalid(struct file *fp, struct hfi1_tid_info *tinfo)
 {
-	struct hfi1_filedata *fdata = fp->private_data;
-	struct hfi1_ctxtdata *uctxt = fdata->uctxt;
+	struct hfi1_filedata *fd = fp->private_data;
+	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	unsigned long *ev = uctxt->dd->events +
 		(((uctxt->ctxt - uctxt->dd->first_user_ctxt) *
-		  HFI1_MAX_SHARED_CTXTS) + fdata->subctxt);
+		  HFI1_MAX_SHARED_CTXTS) + fd->subctxt);
 	u32 *array;
 	int ret = 0;
 
-	if (!fdata->invalid_tids) {
+	if (!fd->invalid_tids) {
 		ret = -EINVAL;
 		goto done;
 	}
@@ -633,14 +633,14 @@ int hfi1_user_exp_rcv_invalid(struct file *fp, struct hfi1_tid_info *tinfo)
 		goto done;
 	}
 
-	spin_lock(&fdata->invalid_lock);
-	if (fdata->invalid_tid_idx) {
-		memcpy(array, fdata->invalid_tids, sizeof(*array) *
-		       fdata->invalid_tid_idx);
-		memset(fdata->invalid_tids, 0, sizeof(*fdata->invalid_tids) *
-		       fdata->invalid_tid_idx);
-		tinfo->tidcnt = fdata->invalid_tid_idx;
-		fdata->invalid_tid_idx = 0;
+	spin_lock(&fd->invalid_lock);
+	if (fd->invalid_tid_idx) {
+		memcpy(array, fd->invalid_tids, sizeof(*array) *
+		       fd->invalid_tid_idx);
+		memset(fd->invalid_tids, 0, sizeof(*fd->invalid_tids) *
+		       fd->invalid_tid_idx);
+		tinfo->tidcnt = fd->invalid_tid_idx;
+		fd->invalid_tid_idx = 0;
 		/*
 		 * Reset the user flag while still holding the lock.
 		 * Otherwise, PSM can miss events.
@@ -649,7 +649,7 @@ int hfi1_user_exp_rcv_invalid(struct file *fp, struct hfi1_tid_info *tinfo)
 	} else {
 		tinfo->tidcnt = 0;
 	}
-	spin_unlock(&fdata->invalid_lock);
+	spin_unlock(&fd->invalid_lock);
 
 	if (tinfo->tidcnt) {
 		if (copy_to_user((void __user *)tinfo->tidlist,
@@ -731,8 +731,8 @@ static int program_rcvarray(struct file *fp, unsigned long vaddr,
 			    unsigned start, u16 count, struct page **pages,
 			    u32 *tidlist, unsigned *tididx, unsigned *pmapped)
 {
-	struct hfi1_filedata *fdata = fp->private_data;
-	struct hfi1_ctxtdata *uctxt = fdata->uctxt;
+	struct hfi1_filedata *fd = fp->private_data;
+	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	struct hfi1_devdata *dd = uctxt->dd;
 	u16 idx;
 	u32 tidinfo = 0, rcventry, useidx = 0;
@@ -800,11 +800,11 @@ static int set_rcvarray_entry(struct file *fp, unsigned long vaddr,
 			      struct page **pages, unsigned npages)
 {
 	int ret;
-	struct hfi1_filedata *fdata = fp->private_data;
-	struct hfi1_ctxtdata *uctxt = fdata->uctxt;
+	struct hfi1_filedata *fd = fp->private_data;
+	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	struct tid_rb_node *node;
 	struct hfi1_devdata *dd = uctxt->dd;
-	struct rb_root *root = &fdata->tid_rb_root;
+	struct rb_root *root = &fd->tid_rb_root;
 	dma_addr_t phys;
 
 	/*
@@ -850,7 +850,7 @@ static int set_rcvarray_entry(struct file *fp, unsigned long vaddr,
 		return -EFAULT;
 	}
 	hfi1_put_tid(dd, rcventry, PT_EXPECTED, phys, ilog2(npages) + 1);
-	trace_hfi1_exp_tid_reg(uctxt->ctxt, fdata->subctxt, rcventry, npages,
+	trace_hfi1_exp_tid_reg(uctxt->ctxt, fd->subctxt, rcventry, npages,
 			       node->mmu.addr, node->phys, phys);
 	return 0;
 }
@@ -858,8 +858,8 @@ static int set_rcvarray_entry(struct file *fp, unsigned long vaddr,
 static int unprogram_rcvarray(struct file *fp, u32 tidinfo,
 			      struct tid_group **grp)
 {
-	struct hfi1_filedata *fdata = fp->private_data;
-	struct hfi1_ctxtdata *uctxt = fdata->uctxt;
+	struct hfi1_filedata *fd = fp->private_data;
+	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	struct hfi1_devdata *dd = uctxt->dd;
 	struct tid_rb_node *node;
 	u8 tidctrl = EXP_TID_GET(tidinfo, CTRL);
@@ -876,27 +876,27 @@ static int unprogram_rcvarray(struct file *fp, u32 tidinfo,
 
 	rcventry = tididx + (tidctrl - 1);
 
-	node = fdata->entry_to_rb[rcventry];
+	node = fd->entry_to_rb[rcventry];
 	if (!node || node->rcventry != (uctxt->expected_base + rcventry))
 		return -EBADF;
 	if (HFI1_CAP_IS_USET(TID_UNMAP))
-		mmu_rb_remove(&fdata->tid_rb_root, &node->mmu, NULL);
+		mmu_rb_remove(&fd->tid_rb_root, &node->mmu, NULL);
 	else
-		hfi1_mmu_rb_remove(&fdata->tid_rb_root, &node->mmu);
+		hfi1_mmu_rb_remove(&fd->tid_rb_root, &node->mmu);
 
 	if (grp)
 		*grp = node->grp;
-	clear_tid_node(fdata, fdata->subctxt, node);
+	clear_tid_node(fd, fd->subctxt, node);
 	return 0;
 }
 
-static void clear_tid_node(struct hfi1_filedata *fdata, u16 subctxt,
+static void clear_tid_node(struct hfi1_filedata *fd, u16 subctxt,
 			   struct tid_rb_node *node)
 {
-	struct hfi1_ctxtdata *uctxt = fdata->uctxt;
+	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	struct hfi1_devdata *dd = uctxt->dd;
 
-	trace_hfi1_exp_tid_unreg(uctxt->ctxt, fdata->subctxt, node->rcventry,
+	trace_hfi1_exp_tid_unreg(uctxt->ctxt, fd->subctxt, node->rcventry,
 				 node->npages, node->mmu.addr, node->phys,
 				 node->dma_addr);
 
@@ -910,7 +910,7 @@ static void clear_tid_node(struct hfi1_filedata *fdata, u16 subctxt,
 	pci_unmap_single(dd->pcidev, node->dma_addr, node->mmu.len,
 			 PCI_DMA_FROMDEVICE);
 	hfi1_release_user_pages(current->mm, node->pages, node->npages, true);
-	fdata->tid_n_pinned -= node->npages;
+	fd->tid_n_pinned -= node->npages;
 
 	node->grp->used--;
 	node->grp->map &= ~(1 << (node->rcventry - node->grp->base));
@@ -928,7 +928,7 @@ static void unlock_exp_tids(struct hfi1_ctxtdata *uctxt,
 			    struct exp_tid_set *set, struct rb_root *root)
 {
 	struct tid_group *grp, *ptr;
-	struct hfi1_filedata *fdata = container_of(root, struct hfi1_filedata,
+	struct hfi1_filedata *fd = container_of(root, struct hfi1_filedata,
 						tid_rb_root);
 	int i;
 
@@ -940,17 +940,17 @@ static void unlock_exp_tids(struct hfi1_ctxtdata *uctxt,
 				u16 rcventry = grp->base + i;
 				struct tid_rb_node *node;
 
-				node = fdata->entry_to_rb[rcventry -
+				node = fd->entry_to_rb[rcventry -
 							  uctxt->expected_base];
 				if (!node || node->rcventry != rcventry)
 					continue;
 				if (HFI1_CAP_IS_USET(TID_UNMAP))
-					mmu_rb_remove(&fdata->tid_rb_root,
+					mmu_rb_remove(&fd->tid_rb_root,
 						      &node->mmu, NULL);
 				else
-					hfi1_mmu_rb_remove(&fdata->tid_rb_root,
+					hfi1_mmu_rb_remove(&fd->tid_rb_root,
 							   &node->mmu);
-				clear_tid_node(fdata, -1, node);
+				clear_tid_node(fd, -1, node);
 			}
 		}
 	}
