@@ -9928,47 +9928,48 @@ static const char *state_completed_string(u32 completed)
 	return "unknown";
 }
 
-const char *state_complete_reason_code_string(struct hfi1_pportdata *ppd,
-					      u32 code)
+static const char all_lanes_dead_timeout_expired[] =
+	"All lanes were inactive – was the interconnect media removed?";
+static const char tx_out_of_policy[] =
+	"Passing lanes on local port do not meet the local link width policy";
+static const char no_state_complete[] =
+	"State timeout occurred before link partner completed the state";
+static const char * const state_complete_reasons[] = {
+	[0x00] = "Reason unknown",
+	[0x01] = "Link was halted by driver, refer to LinkDownReason",
+	[0x02] = "Link partner reported failure",
+	[0x10] = "Unable to achieve frame sync on any lane",
+	[0x11] =
+	  "Unable to find a common bit rate with the link partner",
+	[0x12] =
+	  "Unable to achieve frame sync on sufficient lanes to meet the local link width policy",
+	[0x13] =
+	  "Unable to identify preset equalization on sufficient lanes to meet the local link width policy",
+	[0x14] = no_state_complete,
+	[0x15] =
+	  "State timeout occurred before link partner identified equalization presets",
+	[0x16] =
+	  "Link partner completed the EstablishComm state, but the passing lanes do not meet the local link width policy",
+	[0x17] = tx_out_of_policy,
+	[0x20] = all_lanes_dead_timeout_expired,
+	[0x21] =
+	  "Unable to achieve acceptable BER on sufficient lanes to meet the local link width policy",
+	[0x22] = no_state_complete,
+	[0x23] =
+	  "Link partner completed the OptimizeEq state, but the passing lanes do not meet the local link width policy",
+	[0x24] = tx_out_of_policy,
+	[0x30] = all_lanes_dead_timeout_expired,
+	[0x31] =
+	  "State timeout occurred waiting for host to process received frames",
+	[0x32] = no_state_complete,
+	[0x33] =
+	  "Link partner completed the VerifyCap state, but the passing lanes do not meet the local link width policy",
+	[0x34] = tx_out_of_policy,
+};
+
+static const char *state_complete_reason_code_string(struct hfi1_pportdata *ppd,
+						     u32 code)
 {
-	static const char all_lanes_dead_timeout_expired[] =
-	  "All lanes were inactive – was the interconnect media removed?";
-	static const char tx_out_of_policy[] =
-	  "Passing lanes on local port do not meet the local link width policy";
-	static const char no_state_complete[] =
-	  "State timeout occurred before link partner completed the state";
-	static const char * const state_complete_reasons[] = {
-		[0x00] = "Reason unknown",
-		[0x01] = "Link was halted by driver, refer to LinkDownReason",
-		[0x02] = "Link partner reported failure",
-		[0x10] = "Unable to achieve frame sync on any lane",
-		[0x11] =
-		  "Unable to find a common bit rate with the link partner",
-		[0x12] =
-		  "Unable to achieve frame sync on sufficient lanes to meet the local link width policy",
-		[0x13] =
-		  "Unable to identify preset equalization on sufficient lanes to meet the local link width policy",
-		[0x14] = no_state_complete,
-		[0x15] =
-		  "State timeout occurred before link partner identified equalization presets",
-		[0x16] =
-		  "Link partner completed the EstablishComm state, but the passing lanes do not meet the local link width policy",
-		[0x17] = tx_out_of_policy,
-		[0x20] = all_lanes_dead_timeout_expired,
-		[0x21] =
-		  "Unable to achieve acceptable BER on sufficient lanes to meet the local link width policy",
-		[0x22] = no_state_complete,
-		[0x23] =
-		  "Link partner completed the OptimizeEq state, but the passing lanes do not meet the local link width policy",
-		[0x24] = tx_out_of_policy,
-		[0x30] = all_lanes_dead_timeout_expired,
-		[0x31] =
-		  "State timeout occurred waiting for host to process received frames",
-		[0x32] = no_state_complete,
-		[0x33] =
-		  "Link partner completed the VerifyCap state, but the passing lanes do not meet the local link width policy",
-		[0x34] = tx_out_of_policy,
-	};
 	const char *str = NULL;
 
 	if (code < ARRAY_SIZE(state_complete_reasons))
