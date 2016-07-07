@@ -1097,8 +1097,8 @@ void sbus_request(struct hfi1_devdata *dd,
  *
  * Requires the caller to be in fast mode
  */
-u32 sbus_read(struct hfi1_devdata *dd, u8 receiver_addr, u8 data_addr,
-	      u32 data_in)
+static u32 sbus_read(struct hfi1_devdata *dd, u8 receiver_addr, u8 data_addr,
+		     u32 data_in)
 {
 	u64 reg;
 	int retries;
