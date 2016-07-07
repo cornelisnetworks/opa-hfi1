@@ -123,25 +123,34 @@ int hfi1_mmu_rb_register(void *ops_arg, struct mm_struct *mm,
 
 void hfi1_mmu_rb_unregister(struct mmu_rb_handler *handler)
 {
+	struct mmu_rb_node *rbnode;
 	unsigned long flags;
+	struct list_head del_list;
 
 	/* Unregister first so we don't get any more notifications. */
 	mmu_notifier_unregister(&handler->mn, handler->mm);
 
-	down_write(&handler->mm->mmap_sem);
+	INIT_LIST_HEAD(&del_list);
+
 	spin_lock_irqsave(&handler->lock, flags);
 	if (!RB_EMPTY_ROOT(&handler->root)) {
 		struct rb_node *node;
-		struct mmu_rb_node *rbnode;
 
 		while ((node = rb_first(&handler->root))) {
 			rbnode = rb_entry(node, struct mmu_rb_node, node);
 			rb_erase(node, &handler->root);
-			handler->ops->remove(handler->ops_arg, rbnode,
-					     handler->mm, false);
+			list_add(&rbnode->list, &del_list);
 		}
 	}
 	spin_unlock_irqrestore(&handler->lock, flags);
+
+	down_write(&handler->mm->mmap_sem);
+	while (!list_empty(&del_list)) {
+		rbnode = list_first_entry(&del_list, struct mmu_rb_node, list);
+		list_del(&rbnode->list);
+		handler->ops->remove(handler->ops_arg, rbnode,
+				     handler->mm, false);
+	}
 	up_write(&handler->mm->mmap_sem);
 
 	kfree(handler);
@@ -211,6 +220,11 @@ struct mmu_rb_node *hfi1_mmu_rb_extract(struct mmu_rb_handler *handler,
 	return node;
 }
 
+/*
+ * It is up to the caller to ensure that this function does not race with the
+ * mmu invalidate notifier which may be calling the users remove callback on
+ * 'node'.
+ */
 void hfi1_mmu_rb_remove(struct mmu_rb_handler *handler,
 			struct mmu_rb_node *node)
 {
@@ -251,6 +265,9 @@ static void mmu_notifier_mem_invalidate(struct mmu_notifier *mn,
 	struct rb_root *root = &handler->root;
 	struct mmu_rb_node *node, *ptr = NULL;
 	unsigned long flags;
+	struct list_head del_list;
+
+	INIT_LIST_HEAD(&del_list);
 
 	spin_lock_irqsave(&handler->lock, flags);
 	for (node = __mmu_int_rb_iter_first(root, start, end - 1);
@@ -261,9 +278,15 @@ static void mmu_notifier_mem_invalidate(struct mmu_notifier *mn,
 			  node->addr, node->len);
 		if (handler->ops->invalidate(handler->ops_arg, node)) {
 			__mmu_int_rb_remove(node, root);
-			/* NOTE: mmu notifier code holds mmap_sem for us */
-			handler->ops->remove(handler->ops_arg, node, mm, true);
+			list_add(&node->list, &del_list);
 		}
 	}
 	spin_unlock_irqrestore(&handler->lock, flags);
+
+	/* NOTE: mmu notifier code holds mmap_sem for us */
+	while (!list_empty(&del_list)) {
+		node = list_first_entry(&del_list, struct mmu_rb_node, list);
+		list_del(&node->list);
+		handler->ops->remove(handler->ops_arg, node, mm, true);
+	}
 }

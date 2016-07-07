@@ -54,6 +54,7 @@ struct mmu_rb_node {
 	unsigned long len;
 	unsigned long __last;
 	struct rb_node node;
+	struct list_head list;
 };
 
 struct mmu_rb_ops {
