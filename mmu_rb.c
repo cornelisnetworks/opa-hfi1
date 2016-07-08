@@ -124,6 +124,7 @@ int hfi1_mmu_rb_register(void *ops_arg, struct mm_struct *mm,
 void hfi1_mmu_rb_unregister(struct mmu_rb_handler *handler)
 {
 	struct mmu_rb_node *rbnode;
+	struct rb_node *node;
 	unsigned long flags;
 	struct list_head del_list;
 
@@ -133,14 +134,10 @@ void hfi1_mmu_rb_unregister(struct mmu_rb_handler *handler)
 	INIT_LIST_HEAD(&del_list);
 
 	spin_lock_irqsave(&handler->lock, flags);
-	if (!RB_EMPTY_ROOT(&handler->root)) {
-		struct rb_node *node;
-
-		while ((node = rb_first(&handler->root))) {
-			rbnode = rb_entry(node, struct mmu_rb_node, node);
-			rb_erase(node, &handler->root);
-			list_add(&rbnode->list, &del_list);
-		}
+	while ((node = rb_first(&handler->root))) {
+		rbnode = rb_entry(node, struct mmu_rb_node, node);
+		rb_erase(node, &handler->root);
+		list_add(&rbnode->list, &del_list);
 	}
 	spin_unlock_irqrestore(&handler->lock, flags);
 
