@@ -87,6 +87,8 @@ static u32 find_phys_blocks(struct page **, unsigned, struct tid_pageset *);
 static int set_rcvarray_entry(struct file *, unsigned long, u32,
 			      struct tid_group *, struct page **, unsigned);
 static int tid_rb_insert(void *, struct mmu_rb_node *);
+static void cacheless_tid_rb_remove(struct hfi1_filedata *,
+				    struct mmu_rb_node *);
 static void tid_rb_remove(void *, struct mmu_rb_node *,
 			  struct mm_struct *, bool in_notifier);
 static int tid_rb_invalidate(void *, struct mmu_rb_node *);
@@ -94,7 +96,8 @@ static int program_rcvarray(struct file *, unsigned long, struct tid_group *,
 			    struct tid_pageset *, unsigned, u16, struct page **,
 			    u32 *, unsigned *, unsigned *);
 static int unprogram_rcvarray(struct file *, u32, struct tid_group **);
-static void clear_tid_node(struct hfi1_filedata *, struct tid_rb_node *);
+static void clear_tid_node(struct hfi1_filedata *fd, struct mm_struct *mm,
+			   struct tid_rb_node *node);
 
 static struct mmu_rb_ops tid_rb_ops = {
 	.insert = tid_rb_insert,
@@ -873,18 +876,21 @@ static int unprogram_rcvarray(struct file *fp, u32 tidinfo,
 	node = fd->entry_to_rb[rcventry];
 	if (!node || node->rcventry != (uctxt->expected_base + rcventry))
 		return -EBADF;
-	if (!fd->handler)
-		mmu_rb_remove(fd, &node->mmu, fd->mm, false);
-	else
-		hfi1_mmu_rb_remove(fd->handler, &node->mmu);
 
 	if (grp)
 		*grp = node->grp;
-	clear_tid_node(fd, node);
+
+	if (!fd->handler)
+		cacheless_tid_rb_remove(fd, &node->mmu);
+	else
+		hfi1_mmu_rb_remove(fd->handler, &node->mmu);
+
 	return 0;
 }
 
-static void clear_tid_node(struct hfi1_filedata *fd, struct tid_rb_node *node)
+static void clear_tid_node(struct hfi1_filedata *fd,
+			   struct mm_struct *mm,
+			   struct tid_rb_node *node)
 {
 	struct hfi1_ctxtdata *uctxt = fd->uctxt;
 	struct hfi1_devdata *dd = uctxt->dd;
@@ -902,7 +908,9 @@ static void clear_tid_node(struct hfi1_filedata *fd, struct tid_rb_node *node)
 
 	pci_unmap_single(dd->pcidev, node->dma_addr, node->mmu.len,
 			 PCI_DMA_FROMDEVICE);
-	hfi1_release_user_pages(fd->mm, node->pages, node->npages, true);
+	hfi1_release_user_pages(NULL, node->pages, node->npages, true);
+	mm->pinned_vm -= node->npages;
+
 	fd->tid_n_pinned -= node->npages;
 
 	node->grp->used--;
@@ -936,18 +944,25 @@ static void unlock_exp_tids(struct hfi1_ctxtdata *uctxt,
 							  uctxt->expected_base];
 				if (!node || node->rcventry != rcventry)
 					continue;
-				if (!fd->handler)
-					mmu_rb_remove(fd, &node->mmu, fd->mm,
-						      false);
-				else
-					hfi1_mmu_rb_remove(fd->handler,
-							   &node->mmu);
-				clear_tid_node(fd, node);
+
+				cacheless_tid_rb_remove(fd, &node->mmu);
 			}
 		}
 	}
 }
 
+/*
+ * This function should always return 0.
+ *
+ * This call is is simply advising PSM that the page needs to be removed and
+ * therefore PSM may still be using the page.  So we can't remove the page in
+ * this context.
+ *
+ * Returning anything but 0 will signal the invalidate callback
+ * mmu_notifier_mem_invalidate (mmu_rb.c) to call our remove function
+ * tid_rb_remove which unpins the pages and frees 'mnode'.  Therefore this
+ * function must return 0.
+ */
 static int tid_rb_invalidate(void *arg, struct mmu_rb_node *mnode)
 {
 	struct hfi1_filedata *fdata = arg;
@@ -1002,6 +1017,14 @@ static int tid_rb_insert(void *arg, struct mmu_rb_node *node)
 	return 0;
 }
 
+static void cacheless_tid_rb_remove(struct hfi1_filedata *fdata,
+				    struct mmu_rb_node *node)
+{
+	down_write(&fdata->mm->mmap_sem);
+	tid_rb_remove(fdata, node, fdata->mm, false);
+	up_write(&fdata->mm->mmap_sem);
+}
+
 static void tid_rb_remove(void *arg, struct mmu_rb_node *node,
 			  struct mm_struct *mm, bool in_notifier)
 {
@@ -1011,4 +1034,5 @@ static void tid_rb_remove(void *arg, struct mmu_rb_node *node,
 	u32 base = fdata->uctxt->expected_base;
 
 	fdata->entry_to_rb[tnode->rcventry - base] = NULL;
+	clear_tid_node(fdata, mm, tnode);
 }
