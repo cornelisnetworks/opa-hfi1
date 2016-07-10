@@ -169,15 +169,18 @@ static inline int is_valid_mmap(u64 token)
 
 static int hfi1_file_open(struct inode *inode, struct file *fp)
 {
-	/* The real work is performed later in assign_ctxt() */
-	fp->private_data = kzalloc(sizeof(struct hfi1_filedata), GFP_KERNEL);
-	if (fp->private_data) {
-		struct hfi1_filedata *fd = fp->private_data;
+	struct hfi1_filedata *fd;
 
-		/* no cpu affinity by default */
+	/* The real work is performed later in assign_ctxt() */
+
+	fd = kzalloc(sizeof(*fd), GFP_KERNEL);
+
+	if (fd) /* no cpu affinity by default */
 		fd->rec_cpu_num = -1;
-	}
-	return fp->private_data ? 0 : -ENOMEM;
+
+	fp->private_data = fd;
+
+	return fd ? 0 : -ENOMEM;
 }
 
 static ssize_t hfi1_file_write(struct file *fp, const char __user *data,
