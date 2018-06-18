@@ -1,0 +1,41 @@
+
+Building the software
+
+./do-update-makerpm<distro>.sh -S ${PWD} -w ${PWD}/tmp
+
+Replace the distro string with the appropriate version of the build system
+
+do-update-makerpmRH73.sh
+do-update-makerpmRH74.sh
+do-update-makerpmSLES12SP2.sh
+do-update-makerpmSLES12SP3.sh
+
+There are also CUDA versions
+
+do-update-makerpmRH73-gpu.sh
+do-update-makerpmRH74-gpu.sh
+do-update-makerpmSLES12SP2-gpu.sh
+do-update-makerpmSLES12SP3-gpu.sh
+
+Before running the CUDA builds, make sure the CUDA packages are installed
+on your machine. Also export the following directories
+
+SLES 12.2
+
+export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/usr/src/kernel-modules/nvidia-367.48-default}
+
+SLES 12.3
+
+export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/opt/nvidia/NVIDIA-Linux-x86_64-384.66-diagnostic/kernel}
+
+RHEL 7.3 and 7.4
+
+export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/usr/src/nvidia-367.48}
+
+
+Make sure you clear out the tmp directory before rebuilding
+
+Once the SRC RPM is created, build the binary RPM from ./tmp/rpmbuild directory execute the following command
+
+rpmbuild --rebuild --define "_topdir $(pwd)" --nodeps SRPMS/*.src.rpm
+
