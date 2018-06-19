@@ -502,7 +502,7 @@ if [ "$DEFAULT_KERNEL_VERSION" == "" ]; then
 	exit 1
 fi
 
-rpmrelease=1514
+rpmrelease=1515
 echo "rpmrelease = $rpmrelease"
 
 echo "Setting up RPM build area"

@@ -485,7 +485,7 @@ if [ "$DEFAULT_KERNEL_VERSION" == "" ]; then
 	exit 1
 fi
 
-rpmrelease=1514
+rpmrelease=1515
 rpmrelease+="cuda"
 echo "rpmrelease = $rpmrelease"
 

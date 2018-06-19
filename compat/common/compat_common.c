@@ -166,6 +166,7 @@ void cdev_set_parent(struct cdev *p, struct kobject *kobj)
 }
 EXPORT_SYMBOL(cdev_set_parent);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,4,126))
 /*
  * We should only need to wait 100ms after FLR, but some devices take longer.
  * Wait for up to 1000ms for config space to return something other than -1.
@@ -209,4 +210,4 @@ void pcie_flr(struct pci_dev *dev)
 	pci_flr_wait(dev);
 }
 EXPORT_SYMBOL_GPL(pcie_flr);
-
+#endif
