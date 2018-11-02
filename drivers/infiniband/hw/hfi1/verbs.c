@@ -1328,6 +1328,8 @@ int hfi1_verbs_send_pio(struct rvt_qp *qp, struct hfi1_pkt_state *ps,
 
 				if (slen > len)
 					slen = len;
+				if (slen > ps->s_txreq->ss->sge.sge_length)
+					slen = ps->s_txreq->ss->sge.sge_length;
 				rvt_update_sge(ps->s_txreq->ss, slen, false);
 				seg_pio_copy_mid(pbuf, addr, slen);
 				len -= slen;
