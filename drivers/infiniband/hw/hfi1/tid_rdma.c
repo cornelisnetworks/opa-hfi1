@@ -2288,7 +2288,7 @@ void hfi1_rc_rcv_tid_rdma_write_req(struct hfi1_packet *packet)
 	if (hfi1_ruc_check_hdr(ibp, packet))
 		return;
 
-	is_fecn = process_ecn(qp, packet, false);
+	is_fecn = process_ecn(qp, packet);
 	psn = mask_psn(be32_to_cpu(ohdr->bth[2]));
 	trace_hfi1_rsp_rcv_tid_write_req(qp, psn);
 
@@ -2584,7 +2584,7 @@ void hfi1_rc_rcv_tid_rdma_write_resp(struct hfi1_packet *packet)
 	bool is_fecn;
 	unsigned long flags;
 
-	is_fecn = process_ecn(qp, packet, false);
+	is_fecn = process_ecn(qp, packet);
 	psn = mask_psn(be32_to_cpu(ohdr->bth[2]));
 	aeth = be32_to_cpu(ohdr->u.tid_rdma.w_rsp.aeth);
 	opcode = (be32_to_cpu(ohdr->bth[0]) >> 24) & 0xff;
@@ -2770,7 +2770,7 @@ void hfi1_rc_rcv_tid_rdma_read_req(struct hfi1_packet *packet)
 	if (hfi1_ruc_check_hdr(ibp, packet))
 		return;
 
-	is_fecn = process_ecn(qp, packet, false);
+	is_fecn = process_ecn(qp, packet);
 	psn = mask_psn(be32_to_cpu(ohdr->bth[2]));
 	trace_hfi1_rsp_rcv_tid_read_req(qp, psn);
 
@@ -2920,7 +2920,7 @@ void hfi1_rc_rcv_tid_rdma_read_resp(struct hfi1_packet *packet)
 	u32 kpsn, ipsn;
 
 	trace_hfi1_sender_rcv_tid_read_resp(qp);
-	is_fecn = process_ecn(qp, packet, false);
+	is_fecn = process_ecn(qp, packet);
 	kpsn = mask_psn(be32_to_cpu(ohdr->bth[2]));
 	aeth = be32_to_cpu(ohdr->u.tid_rdma.r_rsp.aeth);
 	opcode = (be32_to_cpu(ohdr->bth[0]) >> 24) & 0xff;
@@ -3016,7 +3016,7 @@ void hfi1_rc_rcv_tid_rdma_resync(struct hfi1_packet *packet)
 	bool is_fecn;
 	unsigned long flags;
 
-	is_fecn = process_ecn(qp, packet, false);
+	is_fecn = process_ecn(qp, packet);
 	psn = mask_psn(be32_to_cpu(ohdr->bth[2]));
 
 	generation = mask_psn(psn + 1) >> HFI1_KDETH_BTH_SEQ_SHIFT;
@@ -3122,7 +3122,7 @@ void hfi1_rc_rcv_tid_rdma_ack(struct hfi1_packet *packet)
 	u16 fidx;
 
 	trace_hfi1_tid_write_sender_rcv_tid_ack(qp, 0);
-	is_fecn = process_ecn(qp, packet, false);
+	is_fecn = process_ecn(qp, packet);
 	psn = mask_psn(be32_to_cpu(ohdr->bth[2]));
 	aeth = be32_to_cpu(ohdr->u.tid_rdma.ack.aeth);
 	req_psn = mask_psn(be32_to_cpu(ohdr->u.tid_rdma.ack.verbs_psn));
