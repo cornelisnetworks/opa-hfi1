@@ -236,12 +236,11 @@ static void hfi1_rcd_free(struct kref *kref)
 	struct hfi1_ctxtdata *rcd =
 		container_of(kref, struct hfi1_ctxtdata, kref);
 
-	hfi1_free_ctxtdata(rcd->dd, rcd);
-
 	spin_lock_irqsave(&rcd->dd->uctxt_lock, flags);
 	rcd->dd->rcd[rcd->ctxt] = NULL;
 	spin_unlock_irqrestore(&rcd->dd->uctxt_lock, flags);
 
+	hfi1_free_ctxtdata(rcd->dd, rcd);
 	kfree(rcd);
 }
 
@@ -347,7 +346,10 @@ struct hfi1_ctxtdata *hfi1_rcd_get_by_index(struct hfi1_devdata *dd, u16 ctxt)
 	spin_lock_irqsave(&dd->uctxt_lock, flags);
 	if (dd->rcd[ctxt]) {
 		rcd = dd->rcd[ctxt];
-		hfi1_rcd_get(rcd);
+		if (rcd->del_pend)
+			rcd = NULL;
+		else
+			hfi1_rcd_get(rcd);
 	}
 	spin_unlock_irqrestore(&dd->uctxt_lock, flags);
 

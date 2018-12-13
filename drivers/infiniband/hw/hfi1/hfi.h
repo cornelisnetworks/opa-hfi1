@@ -227,6 +227,8 @@ struct hfi1_ctxtdata {
 
 	/* Device context index */
 	u16 ctxt;
+	/* ctxt deletion is pending */
+	u8 del_pend;
 	/*
 	 * non-zero if ctxt can be shared, and defines the maximum number of
 	 * sub-contexts for this device context.
