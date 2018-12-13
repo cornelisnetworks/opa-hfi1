@@ -769,6 +769,8 @@ static int hfi1_file_close(struct inode *inode, struct file *fp)
 	}
 	spin_unlock_irqrestore(&dd->uctxt_lock, flags);
 
+	uctxt->del_pend = 1;
+
 	/*
 	 * Disable receive context and interrupt available, reset all
 	 * RcvCtxtCtrl bits to default values.

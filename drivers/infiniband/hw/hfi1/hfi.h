@@ -303,7 +303,8 @@ struct hfi1_ctxtdata {
 	u16 expected_base;
 	/* Device context index */
 	u8 ctxt;
-
+	/* ctxt deletion is pending */
+	u8 del_pend;
 	/* PSM Specific fields */
 	/* lock protecting all Expected TID data */
 	struct mutex exp_mutex;
