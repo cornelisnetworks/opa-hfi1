@@ -136,8 +136,6 @@ static void hfi1_netdev_deallocate_ctxt(struct hfi1_devdata *dd,
 {
 	flush_wc();
 
-	msix_free_irq(dd, uctxt->msix_intr);
-
 	/*
 	 * Disable receive context and interrupt available, reset all
 	 * RcvCtxtCtrl bits to default values.
@@ -149,6 +147,9 @@ static void hfi1_netdev_deallocate_ctxt(struct hfi1_devdata *dd,
 		     HFI1_RCVCTRL_NO_RHQ_DROP_DIS |
 		     HFI1_RCVCTRL_NO_EGR_DROP_DIS, uctxt);
 
+	msix_free_irq(dd, uctxt->msix_intr);
+
+	uctxt->msix_intr = CCE_NUM_MSIX_VECTORS;
 	uctxt->event_flags = 0;
 
 	hfi1_clear_tids(uctxt);
