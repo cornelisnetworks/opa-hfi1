@@ -58,11 +58,11 @@
 #define HFI1_AIP_UP 0
 
 #ifdef AIP
-static uint ipoib_accel = 1;
+uint ipoib_accel = 1;
 module_param(ipoib_accel, uint, 0644);
 MODULE_PARM_DESC(ipoib_accel, "Accelerated ipoib mode");
 #else
-static uint ipoib_accel = 0;
+uint ipoib_accel = 0;
 #endif
 
 static u32 qpn_from_mac(u8 *mac_arr)

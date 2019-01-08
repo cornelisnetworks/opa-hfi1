@@ -682,8 +682,10 @@ int hfi1_dev_affinity_init(struct hfi1_devdata *dd)
 			cpumask_set_cpu(curr_cpu, &entry->rcv_intr.mask);
 			cpumask_set_cpu(curr_cpu, &entry->general_intr_mask);
 		} else {
-			int receive_list_size = dd->n_krcv_queues +
-						dd->num_netdev_contexts - 1;
+			int receive_list_size =
+				dd->n_krcv_queues +
+				(ipoib_accel ? dd->num_netdev_contexts : 0) -
+				1;
 			/*
 			 * The general/control context will be the first CPU in
 			 * the default list, so it is removed from the default

@@ -2266,6 +2266,7 @@ extern uint quick_linkup;
 extern uint rcv_intr_timeout;
 extern uint rcv_intr_count;
 extern uint rcv_intr_dynamic;
+extern uint ipoib_accel;
 extern ushort link_crc_mask;
 
 extern struct mutex hfi1_mutex;
