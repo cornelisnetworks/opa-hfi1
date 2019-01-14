@@ -63,6 +63,7 @@ struct hfi1_affinity_node_list node_affinity = {
 static const char * const irq_type_names[] = {
 	"SDMA",
 	"RCVCTXT",
+	"NETDEVCTXT",
 	"GENERAL",
 	"OTHER",
 };
@@ -682,10 +683,6 @@ int hfi1_dev_affinity_init(struct hfi1_devdata *dd)
 			cpumask_set_cpu(curr_cpu, &entry->rcv_intr.mask);
 			cpumask_set_cpu(curr_cpu, &entry->general_intr_mask);
 		} else {
-			int receive_list_size =
-				dd->n_krcv_queues +
-				(ipoib_accel ? dd->num_netdev_contexts : 0) -
-				1;
 			/*
 			 * The general/control context will be the first CPU in
 			 * the default list, so it is removed from the default
@@ -701,7 +698,7 @@ int hfi1_dev_affinity_init(struct hfi1_devdata *dd)
 			 * the default list and add them to the receive list.
 			 */
 			for (i = 0;
-			     i < receive_list_size *
+			     i < (dd->n_krcv_queues - 1) *
 				 hfi1_per_node_cntr[dd->node];
 			     i++) {
 				cpumask_clear_cpu(curr_cpu,
@@ -916,6 +913,11 @@ static int get_irq_affinity(struct hfi1_devdata *dd,
 			set = &entry->rcv_intr;
 		scnprintf(extra, 64, "ctxt %u", rcd->ctxt);
 		break;
+	case IRQ_NETDEVCTXT:
+		rcd = (struct hfi1_ctxtdata *)msix->arg;
+		set = &entry->def_intr;
+		scnprintf(extra, 64, "ctxt %u", rcd->ctxt);
+		break;
 	default:
 		dd_dev_err(dd, "Invalid IRQ type %d\n", msix->type);
 		return -EINVAL;
@@ -987,6 +989,10 @@ void hfi1_put_irq_affinity(struct hfi1_devdata *dd,
 		/* Don't do accounting for control contexts */
 		if (rcd->ctxt != HFI1_CTRL_CTXT)
 			set = &entry->rcv_intr;
+		break;
+	case IRQ_NETDEVCTXT:
+		rcd = (struct hfi1_ctxtdata *)msix->arg;
+		set = &entry->def_intr;
 		break;
 	default:
 		mutex_unlock(&node_affinity.lock);

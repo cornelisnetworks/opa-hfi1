@@ -172,8 +172,9 @@ static int msix_request_rcd_irq_common(struct hfi1_ctxtdata *rcd,
 				       irq_handler_t thread,
 				       const char *name)
 {
-	int nr = msix_request_irq(rcd->dd, rcd, handler,
-				  thread, IRQ_RCVCTXT, name);
+	int nr = msix_request_irq(rcd->dd, rcd, handler, thread,
+				  rcd->is_vnic ? IRQ_NETDEVCTXT : IRQ_RCVCTXT,
+				  name);
 	if (nr < 0)
 		return nr;
 

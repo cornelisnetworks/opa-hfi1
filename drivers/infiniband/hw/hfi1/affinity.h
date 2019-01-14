@@ -52,6 +52,7 @@
 enum irq_type {
 	IRQ_SDMA,
 	IRQ_RCVCTXT,
+	IRQ_NETDEVCTXT,
 	IRQ_GENERAL,
 	IRQ_OTHER
 };
