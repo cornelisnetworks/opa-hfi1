@@ -170,6 +170,18 @@ err:
 	return 1;
 }
 
+static enum ib_wc_status loopback_qp_drop(struct qib_ibport *ibp,
+					  struct rvt_qp *sqp)
+{
+	ibp->rvp.n_pkt_drops++;
+	/*
+	 * For RC, the requester would timeout and retry so
+	 * shortcut the timeouts and just signal too many retries.
+	 */
+	return sqp->ibqp.qp_type == IB_QPT_RC ?
+		IB_WC_RETRY_EXC_ERR : IB_WC_SUCCESS;
+}
+
 /**
  * qib_ruc_loopback - handle UC and RC lookback requests
  * @sqp: the sending QP
@@ -242,17 +254,14 @@ again:
 	}
 	spin_unlock_irqrestore(&sqp->s_lock, flags);
 
-	if (!qp || !(ib_rvt_state_ops[qp->state] & RVT_PROCESS_RECV_OK) ||
+	if (!qp) {
+		send_status = loopback_qp_drop(ibp, sqp);
+		goto serr_no_r_lock;
+	}
+	spin_lock_irqsave(&qp->r_lock, flags);
+	if (!(ib_rvt_state_ops[qp->state] & RVT_PROCESS_RECV_OK) ||
 	    qp->ibqp.qp_type != sqp->ibqp.qp_type) {
-		ibp->rvp.n_pkt_drops++;
-		/*
-		 * For RC, the requester would timeout and retry so
-		 * shortcut the timeouts and just signal too many retries.
-		 */
-		if (sqp->ibqp.qp_type == IB_QPT_RC)
-			send_status = IB_WC_RETRY_EXC_ERR;
-		else
-			send_status = IB_WC_SUCCESS;
+		send_status = loopback_qp_drop(ibp, sqp);
 		goto serr;
 	}
 
@@ -402,6 +411,7 @@ again:
 		     wqe->wr.send_flags & IB_SEND_SOLICITED);
 
 send_comp:
+	send_status = loopback_qp_drop(ibp, sqp);
 	spin_lock_irqsave(&sqp->s_lock, flags);
 	ibp->rvp.n_loop_pkts++;
 flush_send:
@@ -424,6 +434,7 @@ rnr_nak:
 	}
 	if (sqp->s_rnr_retry_cnt < 7)
 		sqp->s_rnr_retry--;
+	send_status = loopback_qp_drop(ibp, sqp);
 	spin_lock_irqsave(&sqp->s_lock, flags);
 	if (!(ib_rvt_state_ops[sqp->state] & RVT_PROCESS_RECV_OK))
 		goto clr_busy;
@@ -451,6 +462,8 @@ err:
 	/* responder goes to error state */
 	rvt_rc_error(qp, wc.status);
 
+serr_no_r_lock:
+	send_status = loopback_qp_drop(ibp, sqp);
 serr:
 	spin_lock_irqsave(&sqp->s_lock, flags);
 	qib_send_complete(sqp, wqe, send_status);
