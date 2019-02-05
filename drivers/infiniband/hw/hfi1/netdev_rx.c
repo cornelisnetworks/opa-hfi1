@@ -82,9 +82,6 @@ static int hfi1_netdev_setup_ctxt(struct hfi1_netdev_priv *priv,
 
 	clear_rcvhdrtail(uctxt);
 
-	rcvctrl_ops = HFI1_RCVCTRL_CTXT_ENB;
-	rcvctrl_ops |= HFI1_RCVCTRL_INTRAVAIL_ENB;
-
 	if (!HFI1_CAP_KGET_MASK(uctxt->flags, MULTI_PKT_EGR))
 		rcvctrl_ops |= HFI1_RCVCTRL_ONE_PKT_EGR_ENB;
 	if (HFI1_CAP_KGET_MASK(uctxt->flags, NODROP_EGR_FULL))
@@ -267,7 +264,9 @@ static void enable_queues(struct hfi1_netdev_priv *priv)
 		dd_dev_info(priv->dd, "enabling queue %d on context %d\n", i,
 			    rxq->rcd->ctxt);
 		napi_enable(&rxq->napi);
-		hfi1_rcvctrl(priv->dd, HFI1_RCVCTRL_INTRAVAIL_ENB, rxq->rcd);
+		hfi1_rcvctrl(priv->dd,
+			     HFI1_RCVCTRL_CTXT_ENB | HFI1_RCVCTRL_INTRAVAIL_ENB,
+			     rxq->rcd);
 	}
 }
 
@@ -284,7 +283,9 @@ static void disable_queues(struct hfi1_netdev_priv *priv)
 			    rxq->rcd->ctxt);
 
 		/* wait for napi if it was scheduled */
-		hfi1_rcvctrl(priv->dd, HFI1_RCVCTRL_INTRAVAIL_DIS, rxq->rcd);
+		hfi1_rcvctrl(priv->dd,
+			     HFI1_RCVCTRL_CTXT_DIS | HFI1_RCVCTRL_INTRAVAIL_DIS,
+			     rxq->rcd);
 		napi_synchronize(&rxq->napi);
 		napi_disable(&rxq->napi);
 	}
