@@ -77,8 +77,6 @@ static int hfi1_ipoib_dev_init(struct net_device *dev)
 
 	priv->netstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
 
-	hfi1_ipoib_tx_init(priv);
-
 	ret = priv->netdev_ops->ndo_init(dev);
 	if (ret)
 		return ret;

@@ -558,33 +558,9 @@ static void hfi1_ipoib_flush_txq(struct work_struct *work)
 		netif_wake_subqueue(dev, txq->q_idx);
 }
 
-void hfi1_ipoib_tx_init(struct hfi1_ipoib_dev_priv *priv)
-{
-	int i;
-
-	for (i = 0; i < priv->netdev->num_tx_queues; i++) {
-		struct hfi1_ipoib_txq *txq = &priv->txqs[i];
-
-		iowait_init(&txq->wait,
-			    0,
-			    hfi1_ipoib_flush_txq,
-			    NULL,
-			    hfi1_ipoib_sdma_sleep,
-			    hfi1_ipoib_sdma_wakeup,
-			    NULL, NULL);
-		txq->priv = priv;
-		txq->sde = NULL;
-		INIT_LIST_HEAD(&txq->tx_list);
-		txq->psn = 0;
-		txq->q_idx = i;
-		txq->flow.tx_queue = 0xff;
-		txq->flow.sc5 = 0xff;
-		txq->pkts_sent = false;
-	}
-}
-
 int hfi1_ipoib_txreq_init(struct hfi1_ipoib_dev_priv *priv)
 {
+	struct net_device *dev = priv->netdev;
 	char buf[HFI1_IPOIB_TXREQ_NAME_LEN];
 	int i;
 
@@ -597,7 +573,7 @@ int hfi1_ipoib_txreq_init(struct hfi1_ipoib_dev_priv *priv)
 	if (!priv->txreq_cache)
 		return -ENOMEM;
 
-	priv->txqs = kcalloc_node(priv->netdev->num_tx_queues,
+	priv->txqs = kcalloc_node(dev->num_tx_queues,
 				  sizeof(struct hfi1_ipoib_txq),
 				  GFP_ATOMIC,
 				  priv->dd->node);
@@ -607,10 +583,28 @@ int hfi1_ipoib_txreq_init(struct hfi1_ipoib_dev_priv *priv)
 		return -ENOMEM;
 	}
 
-	for (i = 0; i < priv->netdev->num_tx_queues; i++) {
-		struct netdev_queue *txq = netdev_get_tx_queue(priv->netdev, i);
+	for (i = 0; i < dev->num_tx_queues; i++) {
+		struct hfi1_ipoib_txq *txq = &priv->txqs[i];
 
-		netdev_queue_numa_node_write(txq, priv->dd->node);
+		iowait_init(&txq->wait,
+			    0,
+			    hfi1_ipoib_flush_txq,
+			    NULL,
+			    hfi1_ipoib_sdma_sleep,
+			    hfi1_ipoib_sdma_wakeup,
+			    NULL,
+			    NULL);
+		txq->priv = priv;
+		txq->sde = NULL;
+		INIT_LIST_HEAD(&txq->tx_list);
+		txq->psn = 0;
+		txq->q_idx = i;
+		txq->flow.tx_queue = 0xff;
+		txq->flow.sc5 = 0xff;
+		txq->pkts_sent = false;
+
+		netdev_queue_numa_node_write(netdev_get_tx_queue(dev, i),
+					     priv->dd->node);
 	}
 
 	return 0;

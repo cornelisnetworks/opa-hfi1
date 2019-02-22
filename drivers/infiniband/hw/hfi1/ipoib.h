@@ -174,7 +174,6 @@ int hfi1_ipoib_send_dma(struct net_device *dev,
 int hfi1_ipoib_txreq_init(struct hfi1_ipoib_dev_priv *priv);
 void hfi1_ipoib_txreq_deinit(struct hfi1_ipoib_dev_priv *priv);
 
-void hfi1_ipoib_tx_init(struct hfi1_ipoib_dev_priv *priv);
 int hfi1_ipoib_rxq_init(struct net_device *dev);
 void hfi1_ipoib_rxq_deinit(struct net_device *dev);
 
