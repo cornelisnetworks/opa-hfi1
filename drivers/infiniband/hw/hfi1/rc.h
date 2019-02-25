@@ -128,6 +128,14 @@ static inline u32 restart_sge(struct rvt_sge_state *ss, struct rvt_swqe *wqe,
 	return wqe->length - len;
 }
 
+static inline void release_rdma_sge_mr(struct rvt_ack_entry *e)
+{
+	if (e->rdma_sge.mr) {
+		rvt_put_mr(e->rdma_sge.mr);
+		e->rdma_sge.mr = NULL;
+	}
+}
+
 int do_rc_ack(struct rvt_qp *qp, u32 aeth, u32 psn, int opcode, u64 val,
 	      struct hfi1_ctxtdata *rcd);
 struct rvt_swqe *do_rc_completion(struct rvt_qp *qp, struct rvt_swqe *wqe,
