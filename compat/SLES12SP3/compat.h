@@ -106,7 +106,8 @@ static inline void *kvzalloc_node(size_t size, gfp_t flags, int node)
 
 #include <asm/barrier.h>
 
-#undef array_index_mask_nospec
+#ifndef array_index_nospec
+
 /**
  * array_index_mask_nospec() - generate a ~0 mask when index < size, 0 otherwise
  * @index: array element index
@@ -130,7 +131,6 @@ static inline unsigned long array_index_mask_nospec(unsigned long index,
 }
 #endif
 
-#undef array_index_nospec
 /*
  * array_index_nospec - sanitize an array index after a bounds check
  *
@@ -156,6 +156,7 @@ static inline unsigned long array_index_mask_nospec(unsigned long index,
 									\
 	(typeof(_i)) (_i & _mask);					\
 })
+#endif /* array_index_nospec  */
 
 #endif /* !HAVE_NOSPEC_H */
 
