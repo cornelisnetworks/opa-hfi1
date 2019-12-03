@@ -1,0 +1,39 @@
+
+Building the software
+
+./do-update-makerpm.sh -S ${PWD} -w ${PWD}/tmp
+
+To build with vnic, use the command
+Note: at this time, this is only operational on RHEL 7.5
+
+./do-update-makerpm.sh -V -S ${PWD} -w ${PWD}/tmp
+
+To build the CUDA version
+
+./do-update-makerpm.sh -G -S ${PWD} -w ${PWD}/tmp
+
+Before running the CUDA builds, make sure the CUDA packages are installed
+on your machine. Also export the following directories
+
+SLES 12.2
+
+export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/usr/src/kernel-modules/nvidia-367.48-default}
+
+SLES 12.3
+
+export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/opt/nvidia/NVIDIA-Linux-x86_64-384.66-diagnostic/kernel}
+
+RHEL 7.3 and 7.4 and 7.5
+
+For CUDA version 8.0
+export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/usr/src/nvidia-367.48}
+
+For CUDA version 9.1
+export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/usr/src/nvidia-387.26}
+
+Make sure you clear out the tmp directory before rebuilding
+
+Once the SRC RPM is created, build the binary RPM from ./tmp/rpmbuild directory execute the following command
+
+rpmbuild --rebuild --define "_topdir $(pwd)" --nodeps SRPMS/*.src.rpm
+
