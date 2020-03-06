@@ -1,0 +1,121 @@
+From 5d8411a03958f4f0c4b536c46255e4d89c0d7c35 Mon Sep 17 00:00:00 2001
+From: Kaike Wan <kaike.wan@intel.com>
+Date: Fri, 28 Sep 2018 06:34:12 -0400
+Subject: [PATCH 1/1] IB/hfi1: resource delta
+
+
+Signed-off-by: Kaike Wan <kaike.wan@intel.com>
+---
+ drivers/infiniband/hw/hfi1/iowait.h | 51 ++++++++++++++++++++-----------------
+ 1 file changed, 27 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/infiniband/hw/hfi1/iowait.h b/drivers/infiniband/hw/hfi1/iowait.h
+index 1a09d8f..579be10 100644
+--- a/drivers/infiniband/hw/hfi1/iowait.h
++++ b/drivers/infiniband/hw/hfi1/iowait.h
+@@ -179,8 +179,10 @@ void iowait_init(struct iowait *wait, u32 tx_limit,
+  * @wq: workqueue for schedule
+  * @cpu: cpu
+  */
+-static inline bool iowait_schedule(struct iowait *wait,
+-				   struct workqueue_struct *wq, int cpu)
++static inline bool iowait_schedule(
++	struct iowait *wait,
++	struct workqueue_struct *wq,
++	int cpu)
+ {
+ 	return !!queue_work_on(cpu, wq, &wait->wait[IOWAIT_IB_SE].iowork);
+ }
+@@ -199,6 +201,7 @@ static inline bool iowait_tid_schedule(struct iowait *wait,
+ 
+ /**
+  * iowait_sdma_drain() - wait for DMAs to drain
++ *
+  * @wait: iowait structure
+  *
+  * This will delay until the iowait sdmas have
+@@ -231,7 +234,7 @@ static inline void iowait_sdma_inc(struct iowait *wait)
+ 
+ /**
+  * iowait_sdma_add - add count to pending
+- * @wait: iowait_work structure
++ * @wait: iowait structure
+  */
+ static inline void iowait_sdma_add(struct iowait *wait, int count)
+ {
+@@ -239,6 +242,17 @@ static inline void iowait_sdma_add(struct iowait *wait, int count)
+ }
+ 
+ /**
++ * iowait_sdma_dec - note pio complete
++ * @wait: iowait structure
++ */
++static inline int iowait_sdma_dec(struct iowait *wait)
++{
++	if (!wait)
++		return 0;
++	return atomic_dec_and_test(&wait->sdma_busy);
++}
++
++/**
+  * iowait_pio_drain() - wait for pios to drain
+  *
+  * @wait: iowait structure
+@@ -265,20 +279,6 @@ static inline int iowait_pio_pending(struct iowait *w)
+ }
+ 
+ /**
+- * iowait_drain_wakeup() - trigger iowait_drain() waiter
+- * @wait: iowait structure
+- *
+- * This will trigger any waiters.
+- */
+-static inline void iowait_drain_wakeup(struct iowait *w)
+-{
+-	wake_up(&w->wait_dma);
+-	wake_up(&w->wait_pio);
+-	if (w->sdma_drained)
+-		w->sdma_drained(w);
+-}
+-
+-/**
+  * iowait_pio_inc - note pio pending
+  * @wait: iowait structure
+  */
+@@ -299,14 +299,17 @@ static inline int iowait_pio_dec(struct iowait *wait)
+ }
+ 
+ /**
+- * iowait_sdma_dec - note pio complete
++ * iowait_drain_wakeup() - trigger iowait_drain() waiter
+  * @wait: iowait structure
++ *
++ * This will trigger any waiters.
+  */
+-static inline int iowait_sdma_dec(struct iowait *wait)
++static inline void iowait_drain_wakeup(struct iowait *w)
+ {
+-	if (!wait)
+-		return 0;
+-	return atomic_dec_and_test(&wait->sdma_busy);
++	wake_up(&w->wait_dma);
++	wake_up(&w->wait_pio);
++	if (w->sdma_drained)
++		w->sdma_drained(w);
+ }
+ 
+ /**
+@@ -412,8 +415,8 @@ static inline void iowait_starve_find_max(struct iowait *w, u8 *max,
+ }
+ 
+ /**
+- * iowait_packet_queued() - determine if a packet it queued
+- * @wait: the wait structure
++ * iowait_packet_queued() - determine if a packet is queued
++ * @wait: the iowait_work structure
+  */
+ static inline bool iowait_packet_queued(struct iowait_work *w)
+ {
+-- 
+1.7.12.4
+
