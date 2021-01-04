@@ -1,0 +1,32 @@
+#
+# opa_vnic module
+#
+#
+# Called from the kernel module build system.
+#
+ifneq ($(KERNELRELEASE),)
+#kbuild part of makefile
+
+NOSTDINC_FLAGS += -I${M}/include -I${M}/compat
+
+#obj-$(CONFIG_INFINIBAND_OPA_VNIC) += opa_vnic.o
+obj-m += opa_vnic.o
+
+opa_vnic-y := opa_vnic_netdev.o opa_vnic_encap.o opa_vnic_ethtool.o \
+              opa_vnic_vema.o opa_vnic_vema_iface.o
+opa_vnic-$(CONFIG_DEBUG_FS) += opa_vnic_debugfs.o
+
+else
+#normal makefile
+KDIR ?= /lib/modules/`uname -r`/build
+
+default:
+	$(MAKE) -C $(KDIR) M=$$PWD
+
+clean:
+	$(MAKE) -C $(KDIR) M=$$PWD clean
+
+install:
+	$(MAKE) INSTALL_MOD_DIR=updates -C $(KDIR) M=$$PWD modules_install
+
+endif
