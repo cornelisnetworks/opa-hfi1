@@ -7,6 +7,7 @@
 ifneq ($(KERNELRELEASE),)
 #kbuild part of makefile
 
+#CFLAGS_MODULE += $(shell /bin/grep -q atomic_fetch_add_unless $(srctree)/include/linux/atomic.h && echo '-DHAVE_ATOMIC_FETCH_ADD_UNLESS')
 CFLAGS_MODULE += -DUSE_PI_LED_ENABLE=1 -DIFS_DISTRO
 obj-y := rdmavt/ hfi1/ ib_qib/
 

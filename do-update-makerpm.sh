@@ -407,6 +407,9 @@ cp $filedir/Makefile.top $tardir/Makefile
 fi
 
 sed -i "s/IFS_DISTRO/$ifs_distro/g" $tardir/Makefile
+if [ $ifs_distro = IFS_RH82 ]; then
+	sed -i "s/^#CFLAGS_MODULE/CFLAGS_MODULE/" $tardir/Makefile
+fi
 
 echo "Creating Makefile ($tardir/rdmavt/Makefile)"
 cp $filedir/Makefile.rdmavt $tardir/rdmavt/Makefile
@@ -446,14 +449,7 @@ if [ "$DEFAULT_KERNEL_VERSION" == "" ]; then
 	exit 1
 fi
 
-if echo $srcdir | grep -q "components";  then
-	rpmrelease=$(git rev-list WFR_driver_first..HEAD -- $srcdir | wc -l)
-	echo "ifs-all build"
-else
-	rpmrelease=$(cd "$srcdir"; git rev-list "WFR_driver_first..HEAD" | wc -l)
-	echo "wfr-linux-devel build"
-fi
-rpmrelease=$((rpmrelease + 1400))
+rpmrelease=$((rpmrelease + 2124))
 if [ $gpubuild = 'true' ]; then
 	rpmrelease+="cuda"
 fi
