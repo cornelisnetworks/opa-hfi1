@@ -73,6 +73,9 @@
 #define NO_RDMA_AH_ATTR_TYPE
 #define NEED_PCI_BRIDGE_SECONDARY_BUS_RESET
 #define HAS_PORT_IMMUTABLE
+#define HAS_SCHED_MM
+#define NO_NOTIFIER_REG_GRAB
+#define NO_MMU_NOTIFIER_MM
 
 #include "compat_common.h"
 

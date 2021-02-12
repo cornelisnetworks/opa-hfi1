@@ -1,4 +1,5 @@
 /*
+ * Copyright(c) 2020 - Cornelis Networks, Inc.
  * Copyright(c) 2015 - 2017 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
@@ -193,7 +194,6 @@ int hfi1_user_sdma_alloc_queues(struct hfi1_ctxtdata *uctxt,
 #ifdef NVIDIA_GPU_DIRECT
 	atomic_set(&pq->n_gpu_locked, 0);
 #endif
-	pq->mm = fd->mm;
 
 	iowait_init(&pq->busy, 0, NULL, NULL, defer_packet_queue,
 		    activate_packet_queue, NULL, NULL);
@@ -235,7 +235,7 @@ int hfi1_user_sdma_alloc_queues(struct hfi1_ctxtdata *uctxt,
 
 	cq->nentries = hfi1_sdma_comp_ring_size;
 #ifdef NVIDIA_GPU_DIRECT
-	ret = hfi1_mmu_rb_register(pq, NULL, &sdma_rb_ops, dd->pport->hfi1_wq,
+	ret = hfi1_mmu_rb_register_gpu(pq, &sdma_rb_ops, dd->pport->hfi1_wq,
 				   &pq->handler_gpu);
 	if (ret) {
 		dd_dev_err(dd, "Failed to allocate SDMA GPU buffer cache %d",
@@ -244,7 +244,7 @@ int hfi1_user_sdma_alloc_queues(struct hfi1_ctxtdata *uctxt,
 	}
 #endif
 
-	ret = hfi1_mmu_rb_register(pq, pq->mm, &sdma_rb_ops, dd->pport->hfi1_wq,
+	ret = hfi1_mmu_rb_register(pq, &sdma_rb_ops, dd->pport->hfi1_wq,
 				   &pq->handler);
 	if (ret) {
 		dd_dev_err(dd, "Failed to register with MMU %d", ret);
@@ -1094,13 +1094,13 @@ static int pin_sdma_pages(struct user_sdma_request *req,
 
 	npages -= node->npages;
 retry:
-	if (!hfi1_can_pin_pages(pq->dd, pq->mm,
+	if (!hfi1_can_pin_pages(pq->dd, current->mm,
 				atomic_read(&pq->n_locked), npages)) {
 		cleared = sdma_cache_evict(pq, npages);
 		if (cleared >= npages)
 			goto retry;
 	}
-	pinned = hfi1_acquire_user_pages(pq->mm,
+	pinned = hfi1_acquire_user_pages(current->mm,
 					 ((unsigned long)iovec->iov.iov_base +
 					 (node->npages * PAGE_SIZE)), npages, 0,
 					 pages + node->npages);
@@ -1109,7 +1109,7 @@ retry:
 		return pinned;
 	}
 	if (pinned != npages) {
-		unpin_vector_pages(pq->mm, pages, node->npages, pinned);
+		unpin_vector_pages(current->mm, pages, node->npages, pinned);
 		return -EFAULT;
 	}
 #ifdef NVIDIA_GPU_DIRECT
@@ -1128,9 +1128,9 @@ static void unpin_sdma_pages(struct sdma_mmu_node *node)
 {
 	if (node->npages) {
 #ifdef NVIDIA_GPU_DIRECT
-		unpin_vector_pages(node->pq->mm, node->pages.host, 0, node->npages);
+		unpin_vector_pages(mm_from_sdma_node(node), node->pages.host, 0, node->npages);
 #else
-		unpin_vector_pages(node->pq->mm, node->pages, 0, node->npages);
+		unpin_vector_pages(mm_from_sdma_node(node), node->pages, 0, node->npages);
 #endif
 		atomic_sub(node->npages, &node->pq->n_locked);
 	}

@@ -1,4 +1,5 @@
 /*
+ * Copyright(c) 2020 Cornelis Networks, Inc.
  * Copyright(c) 2016 - 2017 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
@@ -54,6 +55,7 @@ struct mmu_rb_node {
 	unsigned long len;
 	unsigned long __last;
 	struct rb_node node;
+	struct mmu_rb_handler *handler;
 	struct list_head list;
 };
 
@@ -71,7 +73,28 @@ struct mmu_rb_ops {
 		     void *evict_arg, bool *stop);
 };
 
-int hfi1_mmu_rb_register(void *ops_arg, struct mm_struct *mm,
+struct mmu_rb_handler {
+	struct mmu_notifier mn;
+#ifdef NO_RB_ROOT_CACHE
+	struct rb_root root;
+#else
+	struct rb_root_cached root;
+#endif
+
+#ifdef NO_MMU_NOTIFIER_MM
+	struct mm_struct *mm;
+#endif
+	void *ops_arg;
+	spinlock_t lock;        /* protect the RB tree */
+	bool registered;
+	struct mmu_rb_ops *ops;
+	struct list_head lru_list;
+	struct work_struct del_work;
+	struct list_head del_list;
+	struct workqueue_struct *wq;
+};
+
+int hfi1_mmu_rb_register(void *ops_arg,
 			 struct mmu_rb_ops *ops,
 			 struct workqueue_struct *wq,
 			 struct mmu_rb_handler **handler);
@@ -87,6 +110,10 @@ bool hfi1_mmu_rb_remove_unless_exact(struct mmu_rb_handler *handler,
 
 
 #ifdef NVIDIA_GPU_DIRECT
+int hfi1_mmu_rb_register_gpu(void *ops_arg,
+			     struct mmu_rb_ops *ops,
+			     struct workqueue_struct *wq,
+			     struct mmu_rb_handler **handler);
 struct mmu_rb_node *hfi1_mmu_rb_first_cached(struct mmu_rb_handler *handler);
 struct mmu_rb_node *hfi1_mmu_rb_search_addr(struct mmu_rb_handler *handler,
 					    unsigned long addr,

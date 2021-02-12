@@ -1,5 +1,6 @@
 /*
- * Copyright(c) 2018 Intel Corporation.
+ * Copyright(c) 2020 Cornelis Networks, Inc.
+ * Copyright(c) 2018-2020 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
@@ -64,6 +65,7 @@
 #define HAVE_MAX_SEND_SGE
 #define IB_MODIFY_QP_IS_OK_HAS_LINK
 #define HAS_PORT_IMMUTABLE
+#define NO_MMU_NOTIFIER_MM
 
 #include "compat_common.h"
 

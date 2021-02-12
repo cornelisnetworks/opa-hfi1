@@ -1,5 +1,6 @@
 /*
- * Copyright(c) 2018 Intel Corporation.
+ * Copyright(c) 2020 Cornelis Networks, Inc.
+ * Copyright(c) 2018-2020 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
@@ -62,6 +63,8 @@
 #define NEED_FILE_FINISH
 #define NEED_PCI_BRIDGE_SECONDARY_BUS_RESET
 #define HAS_PORT_IMMUTABLE
+#define NO_MMU_NOTIFIER_MM
+#define NO_MMU_NOTIFIER_MM
 
 #include "compat_common.h"
 

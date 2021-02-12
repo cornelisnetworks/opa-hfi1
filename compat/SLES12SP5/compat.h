@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: (GPL-2.0 OR BSD-3-Clause) */
 /*
- * Copyright(c) 2019 Intel Corporation.
+ * Copyright(c) 2020 Cornelis Networks, Inc.
+ * Copyright(c) 2019-2020 Intel Corporation.
  */
 #if !defined(SLES12SP5_COMPAT_H)
 #define SLES12SP5_COMPAT_H
@@ -25,7 +26,8 @@
 #define NO_RB_ROOT_CACHE
 #define NEED_PCI_BRIDGE_SECONDARY_BUS_RESET
 #define HAS_PORT_IMMUTABLE
-
+#define NO_MMU_NOTIFIER_MM
+#define NO_MMU_NOTIFIER_MM
 #include "compat_common.h"
 
 #undef CONFIG_FAULT_INJECTION

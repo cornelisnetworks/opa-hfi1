@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: (GPL-2.0 OR BSD-3-Clause) */
 /*
- * Copyright(c) 2019 Intel Corporation.
+ * Copyright(c) 2020 Cornelis Networks, Inc.
+ * Copyright(c) 2019-2020 Intel Corporation.
  */
 #if !defined(RH81_COMPAT_H)
 #define RH81_COMPAT_H
@@ -30,6 +31,7 @@
 #define HAVE_RDMA_COPY_AH_ATTR
 #define HAVE_PCI_CORE_AER_CLEAR
 #define HAS_PORT_IMMUTABLE
+#define NO_MMU_NOTIFIER_MM
 
 #include "compat_common.h"
 

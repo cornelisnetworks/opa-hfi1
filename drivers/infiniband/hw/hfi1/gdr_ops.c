@@ -357,8 +357,8 @@ static int hfi1_gdr_open(struct inode *inode, struct file *filep)
 
 	filep->private_data = gd;
 	mutex_init(&gd->mr_lock);
-	ret = hfi1_mmu_rb_register(gd, NULL, &gdr_rb_ops,
-				   gd->gdr_wq, &gd->gdr_handler);
+	ret = hfi1_mmu_rb_register_gpu(gd, &gdr_rb_ops,
+				       gd->gdr_wq, &gd->gdr_handler);
 	if (ret) {
 		filep->private_data = NULL;
 		kfree(gd);

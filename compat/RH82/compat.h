@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: (GPL-2.0 OR BSD-3-Clause) */
 /*
+ * Copyright(c) 2020 Cornelis Networks, Inc.
  * Copyright(c) 2020 Intel Corporation.
  */
 #ifndef RH82_COMPAT_H
@@ -50,6 +51,7 @@
 #define ALLOC_MR_HAS_UDATA
 #define HAVE_CORE_ALLOC_AH
 #define HAVE_IBDEV_INIT_PORT
+#define NO_MMU_NOTIFIER_MM
 
 #include "compat_common.h"
 
