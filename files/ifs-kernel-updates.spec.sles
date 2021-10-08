@@ -1,0 +1,159 @@
+%{!?kver: %global kver %(uname -r)}
+%define kdir /lib/modules/%{kver}/source
+
+Name:           RPMNAME
+Group:		System Environment/Kernel
+Summary:        Extra kernel modules for IFS
+Version:        %(echo %{kver}|sed -e 's/-/_/g')
+Release:        RPMRELEASE
+License:        GPLv2
+Source0:        %{name}-RPMVERSION.tgz
+Source1:        %{name}.files
+Source2:        %{name}.conf
+BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root
+BuildRequires:  %kernel_module_package_buildreqs
+
+Requires:       kernel = %(echo %{kver} | sed -e 's/\(.*\).default/\1/g')
+
+%kernel_module_package -f %{SOURCE1} default
+
+%global kernel_source %(
+        echo "/lib/modules/%{kver}/build"
+)
+
+%global kernelrpm_ver %(
+	echo "%(rpm -q --qf %{VERSION} %(rpm -qf /lib/modules/%{kver}/kernel/))"
+)
+
+# find our target version
+%global kbuild %(
+if [ -z "$kbuild" ]; then 
+	echo "/lib/modules/%{kver}/build"
+else 
+	echo "$kbuild"
+fi
+)
+
+%global kver %(
+if [ -f "%{kbuild}/include/config/kernel.release" ]; then
+	cat %{kbuild}/include/config/kernel.release
+else
+	echo "fail"
+fi
+)
+
+%define modlist MODLIST
+%define mversion MVERSION
+%define kmod_moddir %kernel_module_package_moddir
+
+%description
+Updated kernel modules for OPA IFS
+
+%package devel
+Summary: Development headers for Intel HFI1 driver interface
+Group: System Environment/Development
+
+%description devel
+Development header files for Intel HFI1 driver interface
+
+%prep
+%setup -qn %{name}-RPMVERSION
+rm -rf %{SOURCE2}
+for flavor in %flavors_to_build; do
+        for mod in %modlist; do
+                rm -rf "$mod"_$flavor
+                cp -r $mod  "$mod"_$flavor
+		echo "override $mod %{kernelrpm_ver}-* weak-updates/$mod" >> %{SOURCE2}
+        done
+done
+
+%build
+if [ "%kver" = "fail" ]; then
+        if [ -z "%kbuild" ]; then
+                echo "The default target kernel, %kver, is not installed" >&2
+                echo "To build, set \$kbuild to your target kernel build directory" >&2
+        else
+                echo "Cannot find kernel version in %kbuild" >&2
+        fi
+        exit 1
+fi
+echo "Kernel version is %kver"
+echo "Kernel source directory is \"%kbuild\""
+
+# Build 
+#make CONFIG_INFINIBAND_RDMAVT=m
+for flavor in %flavors_to_build; do
+        for mod in %modlist; do
+                rm -rf $mod
+                cp -r "$mod"_$flavor $mod
+                done
+        echo rpm kernel_source %{kernel_source $flavor}
+        if [ -z "%mversion" ]; then
+                make -j 8 CONFIG_INFINIBAND_RDMAVT=m CONFIG_INFINIBAND_HFI1=m CONFIG_INFINIBAND_QIB=m KDIR=%{kernel_source $flavor} M=$PWD
+        else
+                make -j 8 MVERSION=\"%mversion\" CONFIG_INFINIBAND_RDMAVT=m CONFIG_INFINIBAND_HFI1=m CONFIG_INFINIBAND_QIB=m KDIR=%{kernel_source $flavor} M=$PWD
+        fi
+        for mod in %modlist; do
+                rm -rf "$mod"_$flavor
+                mv -f $mod "$mod"_$flavor
+		ln -s "$mod"_$flavor $mod
+        done
+done
+
+%install
+install -m 644 -D %{SOURCE2} $RPM_BUILD_ROOT/etc/depmod.d/%{name}.conf
+for flavor in %flavors_to_build ; do
+        mkdir -p $RPM_BUILD_ROOT/lib/modules/%kver/%kmod_moddir/%{name}
+        for mod in %modlist; do
+#		make -C /usr/src/linux-obj/%_target_cpu/$flavor modules_install M=$PWD/"$mod"_$flavor
+		if [[ -x "$KERNEL_SIGNING_SCRIPT" ]]; then
+			$KERNEL_SIGNING_SCRIPT "$mod"_$flavor/"$mod".ko
+			/usr/sbin/modinfo "$mod"_$flavor/"$mod".ko | grep -i signer
+		fi
+		install -m 644 -t $RPM_BUILD_ROOT/lib/modules/%kver$flv/%kmod_moddir/%{name} "$mod"_$flavor/"$mod".ko
+		done
+done
+targetdir=$RPM_BUILD_ROOT%{_includedir}/uapi/rdma/hfi/
+rtargetdir=$RPM_BUILD_ROOT%{_includedir}/uapi/rdma/
+mkdir -p $targetdir
+(srcdir=$(pwd)
+cd %kdir
+# build 'unifdef' if binary does not exist
+if [[ ! -f %kdir/scripts/unifdef ]]; then
+	if [[ $(id -u) = 0 ]]; then
+		cd scripts
+		/usr/bin/gcc unifdef.c -o unifdef
+		cd ../
+	fi
+fi
+# handle a different headers_install
+if sh ./scripts/headers_install.sh | grep -q OUTDIR; then
+	sh ./scripts/headers_install.sh $targetdir $srcdir include/rdma/hfi/hfi1_user.h
+	sh ./scripts/headers_install.sh $targetdir $srcdir include/rdma/hfi/hfi1_ioctl.h
+	sh ./scripts/headers_install.sh $rtargetdir $srcdir include/uapi/rdma/rdma_user_ioctl.h
+	sh ./scripts/headers_install.sh $rtargetdir $srcdir include/uapi/rdma/rdma_user_ioctl_cmds.h
+else
+	sh ./scripts/headers_install.sh $srcdir/include/rdma/hfi/hfi1_user.h $targetdir/hfi1_user.h
+	sh ./scripts/headers_install.sh $srcdir/include/rdma/hfi/hfi1_ioctl.h $targetdir/hfi1_ioctl.h
+	sh ./scripts/headers_install.sh $srcdir/include/uapi/rdma/rdma_user_ioctl.h $rtargetdir/rdma_user_ioctl.h
+	sh ./scripts/headers_install.sh $srcdir/include/uapi/rdma/rdma_user_ioctl_cmds.h $rtargetdir/rdma_user_ioctl_cmds.h
+fi
+)
+
+%files devel
+%defattr(-,root,root,-)
+%dir %{_includedir}/uapi/rdma
+%dir %{_includedir}/uapi/rdma/hfi
+%{_includedir}/uapi/rdma/hfi/hfi1_user.h
+%{_includedir}/uapi/rdma/hfi/hfi1_ioctl.h
+%{_includedir}/uapi/rdma/rdma_user_ioctl.h
+%{_includedir}/uapi/rdma/rdma_user_ioctl_cmds.h
+
+%changelog
+* Thu Nov 09 2017 Dennis Dalessandro <dennis.dalessandro@intel.com>
+- Support latest upstream uAPI header scheme
+* Fri Jun 9 2017 Harish Chegondi <harish.chegondi@intel.com>
+- Change the path of the hfi1_user.h header so it doesn't conflict with the distro supplied one.
+* Sat Sep 24 2016 Alex Estrin <alex.estrin@intel.com>
+- Add KMP format spec. Build fix. Minor fix for License string.
+

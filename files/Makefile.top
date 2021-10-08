@@ -1,0 +1,29 @@
+#
+# Top level
+#
+#
+# Called from the kernel module build system.
+#
+ifneq ($(KERNELRELEASE),)
+#kbuild part of makefile
+
+#CFLAGS_MODULE += $(shell /bin/grep -q atomic_fetch_add_unless $(srctree)/include/linux/atomic.h && echo '-DHAVE_ATOMIC_FETCH_ADD_UNLESS')
+CFLAGS_MODULE += $(shell /bin/grep -q efi_rt_services_supported $(srctree)/include/linux/efi.h && echo '-DHAVE_EFI_RT_SERVICES_SUPPORTED')
+CFLAGS_MODULE += $(shell /bin/grep -q ib_sa_sendonly_fullmem_support $(srctree)/include/rdma/ib_sa.h && echo '-DHAVE_IB_SA_SENDONLY_FULLMEM_SUPPORT')
+CFLAGS_MODULE += -DUSE_PI_LED_ENABLE=1 -DIFS_DISTRO -I${M}/include -include ${M}/compat/compat.h
+obj-y := rdmavt/ hfi1/ ib_qib/
+
+else
+#normal makefile
+KDIR ?= /lib/modules/`uname -r`/build
+
+default:
+	$(MAKE) -C $(KDIR) M=$$PWD
+
+clean:
+	$(MAKE) -C $(KDIR) M=$$PWD clean
+
+install:
+	$(MAKE) INSTALL_MOD_DIR=updates -C $(KDIR) M=$$PWD modules_install
+
+endif
