@@ -157,6 +157,15 @@ void hfi1_mmu_rb_unregister(struct mmu_rb_handler *handler)
 	struct list_head del_list;
 
 	/* Unregister first so we don't get any more notifications. */
+	/*
+	 * Must ensure that the mm is not freed before do_remove(),
+	 * so we take one mmgrab here and do the mmdrop when it is safe.
+	 */
+#ifdef NO_MMU_NOTIFIER_MM
+	mmgrab(handler->mm);
+#else
+	mmgrab(handler->mn.mm);
+#endif
 	if (handler->registered) {
 #ifdef NO_MMU_NOTIFIER_MM
 		mmu_notifier_unregister(&handler->mn, handler->mm);
@@ -205,6 +214,12 @@ void hfi1_mmu_rb_unregister(struct mmu_rb_handler *handler)
 	spin_unlock_irqrestore(&handler->lock, flags);
 
 	do_remove(handler, &del_list);
+	/* Now it is safe to free the mm */
+#ifdef NO_MMU_NOTIFIER_MM
+	mmdrop(handler->mm);
+#else
+	mmdrop(handler->mn.mm);
+#endif
 
 	kfree(handler);
 }
