@@ -1,42 +1,110 @@
+--------
+opa-hfi1
+--------
+This is the source version of the hfi1 driver that is released with official IFS
+builds. However it does at times, depending on the branch contain additional
+fixes that could not make the IFS release that customers may find useful.
 
+Branches are generally named based on IFS release. For instance:
+opa-10_11_0_1 represents IFS release 10.11.0.1
+
+At a high level building this software is comprised of the following steps:
+
+1. Build source RPM (.srpm) file
+2. Build a binary RPM (.rpm) from the .srpm
+3. Active the new driver by either:
+	A. Install RPM: install the binary RPM and rebot
+	B. Manually insmod: extract .ko files using rpm2cpio, rmmod/insmod
+4. Verify the correct driver is running by inspecting srcversion
+
+Note the RPM will contain multiple drivers (.ko files):
+ifs-kernel-updates.conf
+hfi1.ko
+ib_ipoib.ko *may not be present on newer distros
+rdmavt.ko
+
+---------------------
 Building the software
+---------------------
 
+Pre-reqs
+--------
+Install necessary build tool chain and kernel source as well as kernel
+development packages to be able to build out of tree kernel modules. For support
+with this, contact your Linux distro.
+
+Before continuing it is highly recommended to note down the srcversion of the
+driver you are currently running.
+
+cat /sys/module/hfi1/srcversion
+
+Note this is available in the modinfo command but modinfo only tells you the
+default driver's information, by default. It is not necessarily the driver that 
+is currently running.
+
+Also be sure to clear out the tmp directory before rebuilding if this isn't the
+first time you are trying to build.
+
+For Non-GPU (default)
+---------------------
 ./do-update-makerpm.sh -S ${PWD} -w ${PWD}/tmp
 
-To build with vnic, use the command
-Note: at this time, this is only operational on RHEL 7.5
 
-./do-update-makerpm.sh -V -S ${PWD} -w ${PWD}/tmp
-
-To build the CUDA version
-
+CUDA Enabled (only if you have Nvidia GPU)
+------------------------------------------
 ./do-update-makerpm.sh -G -S ${PWD} -w ${PWD}/tmp
 
 Before running the CUDA builds, make sure the CUDA packages are installed
-on your machine. Also export the following directories
+on your machine. You will need to set the following environment variable:
 
-SLES 12.2
+NVIDIA_GPU_DIRECT
 
-export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/usr/src/kernel-modules/nvidia-367.48-default}
+Examples:
+	SLES 12.2
+	export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/usr/src/kernel-modules/nvidia-367.48-default}
 
-SLES 12.3
+	SLES 12.3
+	export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/opt/nvidia/NVIDIA-Linux-x86_64-384.66-diagnostic/kernel}
 
-export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/opt/nvidia/NVIDIA-Linux-x86_64-384.66-diagnostic/kernel}
+	RHEL 7.3 and 7.4 and 7.5
+	For CUDA version 8.0
+	export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/usr/src/nvidia-367.48}
 
-RHEL 7.3 and 7.4 and 7.5
+	For CUDA version 9.1
+	export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/usr/src/nvidia-387.26}
 
-For CUDA version 8.0
-export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/usr/src/nvidia-367.48}
 
-For CUDA version 9.1
-export NVIDIA_GPU_DIRECT=${NVIDIA_GPU_DIRECT:-/usr/src/nvidia-387.26}
+Build Binary RPM
+----------------
+Once the SRC RPM is created based on the above steps it will be found in a
+directory similar to:
 
-Make sure you clear out the tmp directory before rebuilding
+$(PWD)/tmp/rpmbuild/SRPMS/ifs-kernel-updates-4.18.0_240.el8.x86_64-1400.src.rpm
 
-Once the SRC RPM is created, build the binary RPM from ./tmp/rpmbuild directory execute the following command
+Now build the binary RPM in ./tmp/rpmbuild with:
 
-rpmbuild --rebuild --define "_topdir $(pwd)" --nodeps SRPMS/*.src.rpm
+cd tmp/rpmbuild && rpmbuild --rebuild --define "_topdir $(pwd)" --nodeps SRPMS/*.src.rpm
 
+This will give you output similar to the following:
+Wrote:
+./tmp/rpmbuild/RPMS/x86_64/kmod-ifs-kernel-updates-4.18.0_240.el8.x86_64-1400.x86_64.rpm
+
+It is a good idea to record the srcversion for the driver you just built. This
+is so you can verify the correct driver is running later on. To do this you
+would extract the RPMs as follows:
+
+rpm2cpio kmod-ifs-kernel-updates-4.18.0_240.el8.x86_64-1400.x86_64.rpm | cpio \
+-idmv --no-absolute-filenames
+
+This will unpack the RPM for you and you can now get at the build .ko file. Now
+we use the modinfo command but be sure to specify the path tot he .ko so it does
+not use the system default:
+
+modinfo ./lib/modules/4.18.0-240.el8.x86_64/extra/ifs-kernel-updates/hfi1.ko | \
+grep srcversion
+
+Note this value down, you will use this to compare against
+/sys/module/hfi1/srcversion after loading the driver.
 
 
 Self-signing kernel modules
@@ -46,3 +114,36 @@ To self-sign kernel modules, set the environment variable "KERNEL_SIGNING_SCRIPT
 perform the signing. The script should call the kernel-supplied sign-file script/program and use custom
 public and private keys. It shall be called from the spec file with one argument, the ko file to sign,
 inside a for-loop that will sign all ko modules generated.
+
+------------
+Installation
+------------
+You have the choice to install the driver permanently, which will overwrite the
+existing IFS driver. Or if you just want to test out something it is perhaps
+better just to temporarily load your driver with insmod command.
+
+Option A: Install RPM
+---------------------
+rpm -Uvh /path/to/RPM/from/above
+dracut -f
+reboot
+
+Option B: Manually insmod
+-------------------------
+See above for instructions to unpack the RPM with rpm2cpio if not already done.
+
+Make sure nothing is using the hfi1 device (exp: opa_fm). 
+
+rmmod ib_ipoib (only for RHEL < 8.4 and SLES < 15.4)
+rmmod hfi1
+insmod ./lib/modules/4.18.0-240.el8.x86_64/extra/ifs-kernel-updates/hfi1.ko 
+
+------------
+Verification
+------------
+Just like as shown previously extract the srcversion for the running driver
+compare with the version you built. If it doesn't match then something went
+wrong and the wrong version of the driver is in use.
+
+cat /sys/module/hfi1/srcversion
+
