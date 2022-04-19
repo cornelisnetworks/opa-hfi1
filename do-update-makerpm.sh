@@ -170,6 +170,12 @@ if [[ -e /etc/os-release ]]; then
 	if [[ "$ID" == "sle_hpc" ]]; then
 		ID="sles"
 	fi
+	if [[ $ID == "centos" ]]; then
+		ID="rhel"
+		VERSION_ID=$(awk '{print $4;}' /etc/centos-release)
+		VERSION_ID_BUILD=${VERSION_ID##*.}
+		VERSION_ID=${VERSION_ID%.*}
+	fi
 else
 	echo "File /etc/os-release is missing."
 	exit 1
